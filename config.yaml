@@ -1,0 +1,65 @@
+# Configuration for the Occult Corpus Research project
+# Copy this file to config.local.yaml and override values as needed.
+
+# Reddit scraping configuration
+reddit:
+  subreddits:
+    - occult
+    - witchcraft
+    - magick
+    - LeftHandPath
+    - chaosmagick
+  time_range: "5y"
+  max_posts_per_subreddit: 5000
+  sort_by: "top"
+  comments_per_post: 50
+
+# Wizard Forums scraping configuration
+wizardforums:
+  base_url: "https://wizardforums.com"
+  forums:
+    - "occult-tutorials-news-articles"
+    - "rituals-spells"
+  max_threads: 1000
+  max_comments_per_thread: 100
+  rate_limit_delay: 2.0
+
+# Text processing pipeline
+processing:
+  language: "en"
+  min_post_length: 50
+  remove_pii: true
+  anonymize_authors: true
+  remove_urls: true
+  remove_markdown: true
+  lowercase: false
+  remove_stopwords: true
+  lemmatize: true
+  min_token_length: 2
+  max_token_length: 25
+
+# NLP and analysis configuration
+analysis:
+  topic_model: "bertopic"
+  n_topics: 20
+  top_n_words: 10
+  ner_model: "spacy"
+  ner_model_name: "en_core_web_lg"
+  network_threshold: 0.05
+  min_entity_count: 3
+  embedding_model: "all-MiniLM-L6-v2"
+
+# Storage paths
+storage:
+  raw_data: "data/raw"
+  processed_data: "data/processed"
+  entities: "data/entities"
+  networks: "data/networks"
+  models: "data/models"
+  checkpoints: "data/checkpoints"
+
+# Logging
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "logs/occult_corpus.log"
