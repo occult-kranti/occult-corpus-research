@@ -1,0 +1,32 @@
+{
+  "archive": "/home/ubuntu/upload/wf-2026-08-15T21-08-04.zip",
+  "counts": {
+    "forums": 28,
+    "threads": 211,
+    "posts": 0,
+    "links": 0,
+    "resources": 0
+  },
+  "coverage": {
+    "post_months": {},
+    "first_post_month": null,
+    "last_post_month": null
+  },
+  "thread_distribution_top20": [
+    [
+      "",
+      211
+    ]
+  ],
+  "post_distribution_top20": [],
+  "resource_types": {},
+  "link_domains_top30": [],
+  "post_length": {
+    "n": 0,
+    "min": null,
+    "median": null,
+    "max": null
+  },
+  "analysis_status": "blocked_for_post_topics",
+  "interpretation_guardrail": "Descriptive coverage only; forum counts and links are not evidence of belief prevalence, influence, causality, or offline practice."
+}

@@ -1,0 +1,40 @@
+{
+  "archive": "/home/ubuntu/upload/wf-2026-08-15T21-05-58.zip",
+  "pass": true,
+  "errors": [],
+  "warnings": [
+    "no posts present; post/topic analysis is blocked until a successful thread crawl is supplied",
+    "posts CSV has header only"
+  ],
+  "counts": {
+    "forums": 28,
+    "threads": 107,
+    "posts": 0,
+    "links": 0,
+    "resources": 0,
+    "pages": 0
+  },
+  "files": [
+    "README.txt",
+    "data/all.ndjson",
+    "data/forums.jsonl",
+    "data/posts.jsonl",
+    "data/threads.jsonl",
+    "index/forums.csv",
+    "index/posts.csv",
+    "index/threads.csv",
+    "metadata/crawl.json",
+    "metadata/errors.json",
+    "metadata/requests.jsonl",
+    "metadata/robots.json",
+    "metadata/schema.json"
+  ],
+  "crawl": {
+    "schema_version": "2.0",
+    "scraper_version": "2.0.0",
+    "scope": "board",
+    "stopped": true,
+    "queue_remaining": 38,
+    "last_error": ""
+  }
+}

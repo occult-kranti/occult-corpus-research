@@ -1,0 +1,28 @@
+{
+  "archive": "/home/ubuntu/upload/wf-2026-08-15T21-07-53.zip",
+  "posts_analyzed": 0,
+  "document_features": [],
+  "lexical_baseline": {
+    "top_terms": [],
+    "vocabulary_size": 0,
+    "token_count": 0,
+    "token_entropy_bits": null,
+    "lexicon_hits": {}
+  },
+  "interaction_features": {
+    "total_quotes": 0,
+    "total_attachments": 0,
+    "post_links": 0,
+    "archive_links": 0,
+    "archive_resources": 0
+  },
+  "topic_model_readiness": {
+    "ready": false,
+    "reason": "Need at least 100 non-empty posts for a smoke topic model; use larger samples for stable comparisons."
+  },
+  "guardrails": [
+    "Do not infer belief, ritual efficacy, dangerousness, or offline behavior from lexical hits.",
+    "Validate topic labels with human coding and report uncertainty.",
+    "Keep quotes and usernames out of public examples unless consent and risk review justify inclusion."
+  ]
+}
