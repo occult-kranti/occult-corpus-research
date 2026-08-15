@@ -197,11 +197,69 @@
     ];
   }
 
+  const MAX_PART_ZIP_BYTES = 28000000;
+  const entryBytes = (entry) => {
+    const data = typeof entry.data === 'string' ? new TextEncoder().encode(entry.data).length : (entry.data || []).length;
+    return data + String(entry.name || '').length + 80;
+  };
+  function suffixPartName(name, partNo) {
+    const m = String(name).match(/^(.*?)(\.[^./]*)?$/);
+    return (m ? m[1] : name) + '.part-' + String(partNo).padStart(3, '0') + (m && m[2] ? m[2] : '');
+  }
+  function splitLargeEntry(entry, maxBytes) {
+    if (entryBytes(entry) <= maxBytes) return [entry];
+    if (typeof entry.data !== 'string' || !entry.data.includes('\n')) throw new Error('archive entry too large to split safely: ' + entry.name);
+    const lines = entry.data.split(/(?<=\n)/);
+    const out = []; let buf = ''; let bufBytes = 0; let part = 1;
+    for (const line of lines) {
+      const lineBytes = new TextEncoder().encode(line).length;
+      const partName = suffixPartName(entry.name, part);
+      const overhead = partName.length + 80;
+      if (buf && overhead + bufBytes + lineBytes > maxBytes) {
+        out.push({ name: partName, data: buf }); part += 1; buf = ''; bufBytes = 0;
+      }
+      const nextName = suffixPartName(entry.name, part);
+      if (nextName.length + 80 + lineBytes > maxBytes) throw new Error('archive line too large to split safely: ' + entry.name);
+      buf += line; bufBytes += lineBytes;
+    }
+    if (buf) out.push({ name: suffixPartName(entry.name, part), data: buf });
+    return out;
+  }
+  function buildArchiveParts(entries) {
+    const expanded = [];
+    for (const entry of entries) expanded.push(...splitLargeEntry(entry, MAX_PART_ZIP_BYTES - 1024));
+    const parts = []; let current = []; let size = 22;
+    for (const entry of expanded) {
+      const n = entryBytes(entry);
+      if (current.length && size + n > MAX_PART_ZIP_BYTES) { parts.push(current); current = []; size = 22; }
+      current.push(entry); size += n;
+    }
+    if (current.length || !parts.length) parts.push(current);
+    return parts;
+  }
   async function downloadArchive() {
-    const filename = 'WizardForums/wf-' + S.stamp + '.zip';
-    const r = await chrome.runtime.sendMessage({ type: 'WF_DOWNLOAD_ARCHIVE', filename, entries: archiveEntries() });
-    if (!r || !r.ok) throw new Error((r && r.error) || 'archive download failed');
-    S.archive = { filename, bytes: r.bytes || null, downloaded_at: isoNow() };
+    const base = 'WizardForums/wf-' + S.stamp;
+    const rawEntries = archiveEntries();
+    const parts = buildArchiveParts(rawEntries);
+    const partNames = parts.map((_, i) => base + '-part-' + String(i + 1).padStart(3, '0') + '-of-' + String(parts.length).padStart(3, '0') + '.zip');
+    const manifest = { schema_version: '2.2', archive_id: S.stamp, part_count: parts.length,
+      parts: partNames.map((name, i) => ({ part: i + 1, filename: name, entry_count: parts[i].length })),
+      logical_entry_count: rawEntries.length, counts: S.counts, created_at: isoNow(), note: 'Join by extracting all parts into one directory; JSONL/CSV files with .part-NNN suffix are ordered chunks.' };
+    const downloaded = []; let totalBytes = 0;
+    for (let i = 0; i < parts.length; i += 1) {
+      const partEntries = [{ name: 'metadata/archive_manifest.json', data: json(manifest) },
+        { name: 'metadata/part.json', data: json({ archive_id: S.stamp, part: i + 1, part_count: parts.length, filename: partNames[i] }) }, ...parts[i]];
+      progress({ archive: { status: 'exporting', part: i + 1, parts: parts.length, filename: partNames[i] } });
+      const r = await chrome.runtime.sendMessage({ type: 'WF_DOWNLOAD_ARCHIVE', filename: partNames[i], entries: partEntries });
+      if (!r || !r.ok) throw new Error((r && r.error) || 'archive part download failed');
+      downloaded.push({ filename: partNames[i], bytes: r.bytes || 0 }); totalBytes += r.bytes || 0;
+    }
+    S.archive = { status: 'ready', filename: partNames[0], parts: downloaded, part_count: parts.length, bytes: totalBytes, downloaded_at: isoNow() };
+  }
+
+  if (typeof globalThis !== 'undefined' && globalThis.__WF_TEST__) {
+    globalThis.__WF_TEST__.buildArchiveParts = buildArchiveParts;
+    globalThis.__WF_TEST__.splitLargeEntry = splitLargeEntry;
   }
 
   async function run() {

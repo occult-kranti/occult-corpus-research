@@ -21,7 +21,7 @@ members-only), crawls forums → threads → posts, and downloads one organized 
 
 ## Output (organized ZIP archive)
 
-Each crawl produces a ZIP with this layout:
+Each crawl produces one ZIP when it fits within the browser download limit. Large crawls are automatically split into ordered ZIP parts such as `wf-<timestamp>-part-001-of-003.zip`; no manual configuration is required.
 
 | Path | Contents |
 |---|---|
@@ -30,6 +30,8 @@ Each crawl produces a ZIP with this layout:
 | `metadata/requests.jsonl` | Visited URL, page kind, HTTP status, success state, byte count, duration, and errors |
 | `metadata/errors.json` | Request failures, robots-skipped URLs, stop state, and last error |
 | `metadata/schema.json` | Archive schema and compatibility information |
+| `metadata/archive_manifest.json` | Shared manifest listing every ZIP part and logical entry count |
+| `metadata/part.json` | Part number, total part count, and filename for the current ZIP |
 | `data/forums.jsonl` | Complete forum records with descriptions, counts, sub-forums, source URL, and timestamps |
 | `data/threads.jsonl` | Complete thread records with author, prefix, counts, timestamps, status flags, and source URL |
 | `data/posts.jsonl` | Complete post/reply records with body text/HTML, quotes, attachments, reactions, edit/deleted/ignored flags, and source URL |
@@ -45,7 +47,7 @@ thread pagination, and every accessible thread discovered in every forum. Link r
 source context, internal/external status, and resource classification. Attachment, PDF, book, and document
 URLs are recorded as metadata; binary files are not downloaded automatically.
 
-Existing NDJSON downloads can be reorganized with `python3 tools/ndjson_to_archive.py old.ndjson organized.zip`.
+When multiple ZIP parts are produced, extract all of them into the same directory. JSONL/CSV files split across parts use ordered `.part-001`, `.part-002` suffixes and can be concatenated in lexical order; `metadata/archive_manifest.json` describes the complete set. Existing NDJSON downloads can be reorganized with `python3 tools/ndjson_to_archive.py old.ndjson organized.zip`.
 The converter preserves the original combined stream and creates the same typed JSONL, CSV, and metadata
 layout used by new crawls.
 
@@ -71,15 +73,15 @@ current site plus synthetic edge-case fixtures.
 `background/sw.js` parses robots directives and Content-Signal declarations and performs size-capped
 UTF-8-safe downloads. `content/content.js` performs same-origin authenticated fetching, polite delay
 and jitter, wildcard-aware Disallow/Allow enforcement, queue deduplication, ID-based record deduplication,
-full pagination traversal, per-page request diagnostics, link/resource extraction, and a ZIP archive builder
-with JSONL and CSV outputs. Leave max pages, max threads, and max requests at `0` for exhaustive mode. `popup/` exposes scope selection,
+full pagination traversal, per-page request diagnostics, link/resource extraction, and a size-aware multi-part ZIP archive builder
+with JSONL and CSV outputs. Each part is kept below the browser-safe raw ZIP target and preserves complete JSONL/CSV records. Leave max pages, max threads, and max requests at `0` for exhaustive mode. `popup/` exposes scope selection,
 caps, compliance acknowledgement, self-test, live progress, and stop controls. Progress and a bounded
 resume mirror are stored in `chrome.storage.local`; a new crawl starts cleanly rather than silently
 mixing old output with a new run.
 
 ## Verification
 
-From this directory, run `node tests/test_parse.js` to validate the live homepage, live forum, and live
+From this directory, run `node tests/test_chunking.js` to validate size-aware partitioning and complete-line boundaries. Run `node tests/test_parse.js` to validate the live homepage, live forum, and live
 thread fixtures together with synthetic cases for pagination, redirects, sticky and locked rows,
 localized counts, canonical URLs, missing post IDs, quotes, attachments, edits, signatures, deleted
 posts, ignored posts, login walls, outbound links, and PDF/book/document/archive classification. Run `node tests/test_compliance.js` to validate robots groups,

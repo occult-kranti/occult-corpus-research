@@ -38,6 +38,14 @@ Version 2.1.0 adds exhaustive whole-board traversal when the scope is set to Who
 
 The parser inventories links found on forum, thread, and post pages. Each link preserves its URL, visible text, title, rel/download attributes, source page, thread and post context, internal/external status, and resource classification. PDFs, ebooks/books, office documents, archives, downloads, and attachment-like URLs are separated into `data/resources.jsonl` and `index/resources.csv`; raw post bodies, quote edges, attachments, reactions, and status flags remain in the post datasets. Binary files are intentionally represented as metadata URLs rather than downloaded automatically.
 
+## Oversized archive diagnosis and fix
+
+A submitted full-board run successfully collected 340 threads, 4,382 posts, and 442 pages, but the single ZIP download failed because its browser data URL reached 67,928,696 characters. Version 2.2.0 replaces the single-download assumption with automatic ordered ZIP parts. The exporter targets raw ZIP parts below 28 MB, which leaves headroom for base64 expansion under the browser download URL limit.
+
+Large JSONL and CSV entries are split only at complete newline boundaries and receive deterministic `.part-001`, `.part-002` suffixes. Each part includes `metadata/archive_manifest.json` and `metadata/part.json`; the manifest records all filenames, part counts, logical entry counts, and crawl counts. Empty entries, Unicode rows, duplicate-safe ordering, and oversized single-line records are handled explicitly. A single non-line-splittable entry larger than the safe threshold produces a clear error rather than silently truncating data.
+
+The archive chunking test suite passed together with parser, compliance, ZIP, and JavaScript syntax tests.
+
 ## Live-site limitation
 
 The browser session used for validation was logged out. WizardForums visibly states that registration is needed to see all posts, and member-only bodies therefore cannot be validated without the user opening the site in their own Chrome profile and logging in normally. The extension is intentionally designed to see only what that authenticated session can see.

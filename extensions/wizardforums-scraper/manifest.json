@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Wizard Forums Scraper",
-  "version": "2.1.0",
-  "description": "Full-board, rate-limited, session-based WizardForums archiver with posts, links, resources, and analysis-ready ZIP exports. Honors robots.txt and Content-Signal policy.",
+  "version": "2.2.0",
+  "description": "Full-board WizardForums archiver with automatic multi-part ZIP exports for posts, links, resources, and analysis-ready data. Honors robots.txt and Content-Signal policy.",
   "permissions": ["storage", "downloads", "activeTab", "scripting"],
   "host_permissions": ["https://wizardforums.com/*"],
   "action": { "default_popup": "popup/popup.html", "default_title": "Wizard Forums Scraper" },

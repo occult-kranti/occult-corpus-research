@@ -58,9 +58,12 @@ async function refreshProgress() {
     'links ' + (c.links || 0), 'resources ' + (c.resources || 0), 'pages ' + (c.pages || 0), 'queue ' + (p.queue || 0)];
   if (c.errors) parts.push('errors ' + c.errors);
   if (c.skipped_disallow) parts.push('skipped(disallow) ' + c.skipped_disallow);
-  if (p.archive && p.archive.filename) {
-    const size = p.archive.bytes ? ' (' + Math.round(p.archive.bytes / 1024) + ' KB)' : '';
-    parts.push('ZIP ready: ' + p.archive.filename + size);
+  if (p.archive && p.archive.status === 'exporting') {
+    parts.push('creating ZIP part ' + p.archive.part + '/' + p.archive.parts + ': ' + p.archive.filename);
+  } else if (p.archive && p.archive.filename) {
+    const size = p.archive.bytes ? ' (' + Math.round(p.archive.bytes / 1024) + ' KB total)' : '';
+    const count = p.archive.part_count ? ' [' + p.archive.part_count + ' parts]' : '';
+    parts.push('ZIP ready' + count + ': ' + p.archive.filename + size);
   }
   $('progress').textContent = parts.join(' — ') + (p.lastError ? '\n' + p.lastError.slice(0, 240) : '');
   $('start').hidden = !!p.running;
