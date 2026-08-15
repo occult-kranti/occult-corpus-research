@@ -24,6 +24,12 @@ The parser now normalizes canonical thread URLs, preserves stable forum slugs wh
 
 The reproducible commands are `node tests/test_parse.js`, `node tests/test_compliance.js`, `node tests/test_archive.js`, `unzip -t /tmp/wizardforums-test-archive.zip`, `node --check lib/xf-parse.js`, `node --check content/content.js`, `node --check background/sw.js`, and `node --check popup/popup.js`.
 
+## Submitted-output diagnosis
+
+The three submitted archives confirm that the parser itself was not the primary failure. The archives contained 0 post records because no thread requests were made in the board crawl: the request logs showed only the index page and forum pages, while the crawl was stopped with forum URLs still queued. The forum-scope archive was started while the active tab was the homepage, so it treated `/` as a forum URL and correctly found no thread rows. The new version rejects that invalid combination instead of silently producing an empty archive.
+
+The crawler now prioritizes discovered thread URLs ahead of additional forum pages. This means a board crawl begins collecting posts as soon as its first forum page yields thread links, rather than waiting behind the entire forum queue. Request diagnostics now include `records_added`, making it immediately visible which fetched pages produced forums, threads, or posts.
+
 ## Live-site limitation
 
 The browser session used for validation was logged out. WizardForums visibly states that registration is needed to see all posts, and member-only bodies therefore cannot be validated without the user opening the site in their own Chrome profile and logging in normally. The extension is intentionally designed to see only what that authenticated session can see.

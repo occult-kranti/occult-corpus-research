@@ -82,7 +82,10 @@
     if (u.indexOf(ORIGIN) !== 0) return;
     if (S.visited.has(u) || S.queued.has(u)) return;
     if (disallowed(u)) { S.counts.skipped_disallow += 1; S.skipped.push({ url: u, kind, reason: 'robots_disallow', at: isoNow() }); return; }
-    S.queued.add(u); S.queue.push({ url: u, kind });
+    S.queued.add(u);
+    const priority = kind === 'thread' ? 1 : (kind === 'forum' ? 2 : 0);
+    S.queue.push({ url: u, kind, priority });
+    S.queue.sort((a, b) => a.priority - b.priority);
   }
 
   async function handleIndex(d, url) {
@@ -180,9 +183,12 @@
         if (item.useDocument) { d = document; logRequest({ url: item.url, kind: item.kind, status: 'current-document', ok: true, bytes: null, duration_ms: 0 }); }
         else { if (!firstFetch) await sleep(delay + Math.floor(delay * 0.25 * Math.random())); firstFetch = false; d = await fetchDoc(item.url, item.kind); }
         S.counts.pages += 1;
+        const before = { forums: S.counts.forums, threads: S.counts.threads, posts: S.counts.posts };
         if (item.kind === 'index') await handleIndex(d, item.url);
         else if (item.kind === 'forum') await handleForum(d, item.url);
         else if (item.kind === 'thread') await handleThread(d, item.url);
+        const request = [...S.requestLog].reverse().find((x) => x.url === item.url && x.kind === item.kind);
+        if (request) request.records_added = { forums: S.counts.forums - before.forums, threads: S.counts.threads - before.threads, posts: S.counts.posts - before.posts };
       } catch (e) { S.counts.errors += 1; S.lastError = String((e && e.message) || e); }
       if (S.counts.pages % 5 === 0) mirror();
       progress();
@@ -196,12 +202,19 @@
     chrome.storage.local.set({ wf_state: { stamp: S.stamp, counts: S.counts,
       visited: Array.from(S.visited).slice(-5000), seenThreads: Array.from(S.seenThreads).slice(-20000), opts: S.opts, at: Date.now() } });
   }
+  function validateScopeStart() {
+    const target = S.opts.startUrl || location.href;
+    const type = XF.detectPageType(target);
+    if (S.opts.scope === 'thread' && type !== 'thread') return 'Thread scope requires a thread page. Open a thread first.';
+    if (S.opts.scope === 'forum' && type !== 'forum') return 'Forum scope requires a forum page. Open a forum first.';
+    return '';
+  }
   function seedQueue() {
     const here = location.href.split('#')[0], type = XF.detectPageType(here);
-    if (S.opts.scope === 'current') S.queue.push({ url: here, kind: type === 'other' ? 'index' : type, useDocument: true });
-    else if (S.opts.scope === 'thread') S.queue.push({ url: S.opts.startUrl || here, kind: 'thread' });
-    else if (S.opts.scope === 'forum') S.queue.push({ url: S.opts.startUrl || here, kind: 'forum' });
-    else S.queue.push({ url: ORIGIN + '/', kind: 'index' });
+    if (S.opts.scope === 'current') S.queue.push({ url: here, kind: type === 'other' ? 'index' : type, useDocument: true, priority: 0 });
+    else if (S.opts.scope === 'thread') S.queue.push({ url: S.opts.startUrl || here, kind: 'thread', priority: 1 });
+    else if (S.opts.scope === 'forum') S.queue.push({ url: S.opts.startUrl || here, kind: 'forum', priority: 2 });
+    else S.queue.push({ url: ORIGIN + '/', kind: 'index', priority: 0 });
   }
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -211,6 +224,8 @@
       chrome.storage.local.get('wf_compliance', (o) => {
         S.compliance = o.wf_compliance || null;
         S.opts = Object.assign({ scope: 'current', delayMs: 4000, includePosts: true, maxPagesPer: 0, maxThreads: 0, maxRequests: 0 }, msg.opts || {});
+        const scopeError = validateScopeStart();
+        if (scopeError) { sendResponse({ ok: false, error: scopeError }); return; }
         S.queue = []; S.queued = new Set(); S.visited = new Set(); S.seenThreads = new Set(); S.seenPosts = new Set();
         S.records = { forums: [], threads: [], posts: [], all: [] }; S.requestLog = []; S.skipped = [];
         S.counts = { forums: 0, threads: 0, posts: 0, pages: 0, errors: 0, skipped_disallow: 0 }; S.lastError = '';
