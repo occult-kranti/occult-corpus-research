@@ -2,7 +2,7 @@
 
 A personal, rate-limited, **session-based** archiver for `wizardforums.com` (XenForo 2.x). It runs as
 a content script in *your own logged-in tab*, so it sees exactly what you can (post bodies there are
-members-only), crawls forums → threads → posts, and streams structured **NDJSON** to your Downloads.
+members-only), crawls forums → threads → posts, and downloads one organized **ZIP archive** per crawl.
 
 ## Install
 1. `chrome://extensions` → Developer mode → **Load unpacked** → this folder (or drag the zip in).
@@ -13,18 +13,36 @@ members-only), crawls forums → threads → posts, and streams structured **NDJ
 - The popup first shows the **site policy check** (see Compliance below). Acknowledge if prompted.
 - Pick a **Scope**: Current page · This thread · This forum · Whole board.
 - Set the **delay** (default 4000 ms — be polite), and optional caps (max pages/threads/requests).
-- **Start.** Keep the tab open. Progress shows live counts; data streams to
-  `Downloads/WizardForums/wf-<timestamp>-NNNN.ndjson` (one part per ~200 records).
+- **Start.** Keep the tab open. Progress shows live counts; when the crawl finishes, the extension downloads
+  `Downloads/WizardForums/wf-<timestamp>.zip`. The ZIP contains typed JSONL data, CSV indexes, crawl
+  metadata, robots policy metadata, request diagnostics, and a combined `data/all.ndjson` compatibility stream.
 - **Self-test page** reports what the parser matched on the current DOM — use it to confirm selectors
   on the live members-only markup, or if a theme update ever breaks something.
 
-## Output (NDJSON, one record per line)
-- `{type:"forum", id, url, title, description, threads_count, messages_count, sub_forums[]}`
-- `{type:"thread", id, url, title, prefix, author, reply_count, view_count, created, last_post, sticky, locked, redirect}`
-- `{type:"post", id, thread_id, thread_title, author, author_id, post_number, posted_at{iso,epoch}, body_text, body_html, quotes[], attachments[], reactions_count, edited, deleted, ignored}`
+## Output (organized ZIP archive)
 
-Concatenate the parts (`cat wf-*.ndjson`) or load line-by-line. `body_text` excludes signatures,
-edit notes, and footer chrome; `body_html` keeps the raw content HTML.
+Each crawl produces a ZIP with this layout:
+
+| Path | Contents |
+|---|---|
+| `metadata/crawl.json` | Scope, options, timestamps, page type, self-test snapshot, counts, stop state, and archive status |
+| `metadata/robots.json` | Parsed Disallow/Allow rules, crawl delay, sitemaps, Content-Signal fields, and raw policy excerpt |
+| `metadata/requests.jsonl` | Visited URL, page kind, HTTP status, success state, byte count, duration, and errors |
+| `metadata/errors.json` | Request failures, robots-skipped URLs, stop state, and last error |
+| `metadata/schema.json` | Archive schema and compatibility information |
+| `data/forums.jsonl` | Complete forum records with descriptions, counts, sub-forums, source URL, and timestamps |
+| `data/threads.jsonl` | Complete thread records with author, prefix, counts, timestamps, status flags, and source URL |
+| `data/posts.jsonl` | Complete post records with body text/HTML, quotes, attachments, reactions, edit/deleted/ignored flags, and source URL |
+| `data/all.ndjson` | Combined stream containing every forum, thread, and post record |
+| `index/*.csv` | Spreadsheet-friendly forum, thread, and post indexes |
+
+The JSONL files preserve nested metadata without flattening. `body_text` excludes signatures, edit notes,
+and footer chrome; `body_html` keeps the raw content HTML. Attachment entries preserve names and URLs,
+but binary attachments are not downloaded automatically.
+
+Existing NDJSON downloads can be reorganized with `python3 tools/ndjson_to_archive.py old.ndjson organized.zip`.
+The converter preserves the original combined stream and creates the same typed JSONL, CSV, and metadata
+layout used by new crawls.
 
 ## Compliance (read this)
 The extension fetches `wizardforums.com/robots.txt` and parses both classic directives **and** the
@@ -48,7 +66,7 @@ current site plus synthetic edge-case fixtures.
 `background/sw.js` parses robots directives and Content-Signal declarations and performs size-capped
 UTF-8-safe downloads. `content/content.js` performs same-origin authenticated fetching, polite delay
 and jitter, wildcard-aware Disallow/Allow enforcement, queue deduplication, ID-based record deduplication,
-request/page/thread caps, and serialized loss-safe NDJSON exports. `popup/` exposes scope selection,
+request/page/thread caps, complete request diagnostics, and a ZIP archive builder with JSONL and CSV outputs. `popup/` exposes scope selection,
 caps, compliance acknowledgement, self-test, live progress, and stop controls. Progress and a bounded
 resume mirror are stored in `chrome.storage.local`; a new crawl starts cleanly rather than silently
 mixing old output with a new run.

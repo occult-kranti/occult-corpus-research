@@ -103,6 +103,7 @@
       forums.push({
         type: /node--category/.test(cls) ? 'category' : 'forum',
         id: id,
+        slug: slugFromUrl(url) || null,
         url: url,
         title: txt(link) || txt(first(node, ['.node-title', 'h3'])),
         description: txt(first(node, ['.node-description', '.node-body .node-description'])),

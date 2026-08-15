@@ -6,7 +6,7 @@ The supplied Manifest V3 extension was reviewed against the live WizardForums ho
 
 ## Implemented hardening
 
-The parser now normalizes canonical thread URLs, accepts more permission-wall variants, handles locale-safe integer and abbreviated count parsing, and extracts post IDs from additional URL forms. The crawl engine now deduplicates queued URLs before fetching, applies wildcard-aware robots matching with longest-match Allow precedence, serializes export flushes to avoid filename races, and keeps origin enforcement in place. Popup progress is rendered with `textContent` rather than `innerHTML`, preventing scraped error strings from being interpreted as markup. The documentation now records the live-fixture and edge-case test workflow.
+The parser now normalizes canonical thread URLs, preserves stable forum slugs when numeric IDs are absent, accepts more permission-wall variants, handles locale-safe integer and abbreviated count parsing, and extracts post IDs from additional URL forms. The crawl engine now retains complete typed records in memory for one final organized ZIP, captures request diagnostics, records robots-skipped URLs, adds derived post measurements, applies wildcard-aware robots matching with longest-match Allow precedence, and keeps origin enforcement in place. Popup progress now reports the generated ZIP filename and size. Progress is rendered with `textContent` rather than `innerHTML`, preventing scraped error strings from being interpreted as markup.
 
 ## Verification matrix
 
@@ -19,8 +19,10 @@ The parser now normalizes canonical thread URLs, accepts more permission-wall va
 | Access behavior | Login and permission walls, populated-post false-positive guard | Passed |
 | Compliance | Robots groups, Disallow/Allow, crawl delay, sitemaps, Content-Signal, Article 4 reservation, malformed input | Passed |
 | Static integrity | JavaScript syntax checks and Manifest V3 host-permission validation | Passed |
+| ZIP archive integrity | ZIP generation with Unicode, nested directories, empty JSONL files, CSV quoting, and external `unzip -t` validation | Passed |
+| Archive metadata | Crawl summary, robots policy, request log, error log, schema descriptor, typed JSONL, combined NDJSON, and CSV indexes | Passed |
 
-The reproducible commands are `node tests/test_parse.js`, `node tests/test_compliance.js`, `node --check lib/xf-parse.js`, `node --check content/content.js`, `node --check background/sw.js`, and `node --check popup/popup.js`.
+The reproducible commands are `node tests/test_parse.js`, `node tests/test_compliance.js`, `node tests/test_archive.js`, `unzip -t /tmp/wizardforums-test-archive.zip`, `node --check lib/xf-parse.js`, `node --check content/content.js`, `node --check background/sw.js`, and `node --check popup/popup.js`.
 
 ## Live-site limitation
 

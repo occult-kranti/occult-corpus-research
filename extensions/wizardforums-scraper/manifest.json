@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Wizard Forums Scraper",
-  "version": "1.0.0",
-  "description": "Personal, rate-limited, session-based archiver for wizardforums.com (XenForo). Crawls forums/threads/posts you can access and exports NDJSON/CSV. Honors robots.txt + content-signal policy.",
+  "version": "2.0.0",
+  "description": "Personal, rate-limited, session-based WizardForums archiver with organized ZIP metadata exports. Honors robots.txt and Content-Signal policy.",
   "permissions": ["storage", "downloads", "activeTab", "scripting"],
   "host_permissions": ["https://wizardforums.com/*"],
   "action": { "default_popup": "popup/popup.html", "default_title": "Wizard Forums Scraper" },

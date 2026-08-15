@@ -58,7 +58,11 @@ async function refreshProgress() {
     'pages ' + (c.pages || 0), 'queue ' + (p.queue || 0)];
   if (c.errors) parts.push('errors ' + c.errors);
   if (c.skipped_disallow) parts.push('skipped(disallow) ' + c.skipped_disallow);
-  $('progress').textContent = parts.join(' — ') + (p.lastError ? '\n' + p.lastError.slice(0, 120) : '');
+  if (p.archive && p.archive.filename) {
+    const size = p.archive.bytes ? ' (' + Math.round(p.archive.bytes / 1024) + ' KB)' : '';
+    parts.push('ZIP ready: ' + p.archive.filename + size);
+  }
+  $('progress').textContent = parts.join(' — ') + (p.lastError ? '\n' + p.lastError.slice(0, 240) : '');
   $('start').hidden = !!p.running;
   $('stop').hidden = !p.running;
 }
