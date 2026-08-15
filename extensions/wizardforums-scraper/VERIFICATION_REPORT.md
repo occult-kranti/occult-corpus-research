@@ -21,6 +21,8 @@ The parser now normalizes canonical thread URLs, preserves stable forum slugs wh
 | Static integrity | JavaScript syntax checks and Manifest V3 host-permission validation | Passed |
 | ZIP archive integrity | ZIP generation with Unicode, nested directories, empty JSONL files, CSV quoting, and external `unzip -t` validation | Passed |
 | Archive metadata | Crawl summary, robots policy, request log, error log, schema descriptor, typed JSONL, combined NDJSON, and CSV indexes | Passed |
+| Link/resource extraction | Internal/external links, PDF, ebook, document, archive, download, and attachment classification | Passed |
+| Full-board model | Forum/thread pagination, exhaustive queue defaults, per-page record counters, page/link/resource datasets | Passed |
 
 The reproducible commands are `node tests/test_parse.js`, `node tests/test_compliance.js`, `node tests/test_archive.js`, `unzip -t /tmp/wizardforums-test-archive.zip`, `node --check lib/xf-parse.js`, `node --check content/content.js`, `node --check background/sw.js`, and `node --check popup/popup.js`.
 
@@ -29,6 +31,12 @@ The reproducible commands are `node tests/test_parse.js`, `node tests/test_compl
 The three submitted archives confirm that the parser itself was not the primary failure. The archives contained 0 post records because no thread requests were made in the board crawl: the request logs showed only the index page and forum pages, while the crawl was stopped with forum URLs still queued. The forum-scope archive was started while the active tab was the homepage, so it treated `/` as a forum URL and correctly found no thread rows. The new version rejects that invalid combination instead of silently producing an empty archive.
 
 The crawler now prioritizes discovered thread URLs ahead of additional forum pages. This means a board crawl begins collecting posts as soon as its first forum page yields thread links, rather than waiting behind the entire forum queue. Request diagnostics now include `records_added`, making it immediately visible which fetched pages produced forums, threads, or posts.
+
+## Full-board archival additions
+
+Version 2.1.0 adds exhaustive whole-board traversal when the scope is set to Whole board and all caps remain at zero. It follows forum pagination, thread pagination, and every non-redirect thread discovered in every accessible forum. Each fetched page now records how many forums, threads, posts, links, and resources it contributed.
+
+The parser inventories links found on forum, thread, and post pages. Each link preserves its URL, visible text, title, rel/download attributes, source page, thread and post context, internal/external status, and resource classification. PDFs, ebooks/books, office documents, archives, downloads, and attachment-like URLs are separated into `data/resources.jsonl` and `index/resources.csv`; raw post bodies, quote edges, attachments, reactions, and status flags remain in the post datasets. Binary files are intentionally represented as metadata URLs rather than downloaded automatically.
 
 ## Live-site limitation
 

@@ -32,13 +32,18 @@ Each crawl produces a ZIP with this layout:
 | `metadata/schema.json` | Archive schema and compatibility information |
 | `data/forums.jsonl` | Complete forum records with descriptions, counts, sub-forums, source URL, and timestamps |
 | `data/threads.jsonl` | Complete thread records with author, prefix, counts, timestamps, status flags, and source URL |
-| `data/posts.jsonl` | Complete post records with body text/HTML, quotes, attachments, reactions, edit/deleted/ignored flags, and source URL |
-| `data/all.ndjson` | Combined stream containing every forum, thread, and post record |
-| `index/*.csv` | Spreadsheet-friendly forum, thread, and post indexes |
+| `data/posts.jsonl` | Complete post/reply records with body text/HTML, quotes, attachments, reactions, edit/deleted/ignored flags, and source URL |
+| `data/links.jsonl` | Every discovered internal and external link with page/thread/post context |
+| `data/resources.jsonl` | PDFs, ebooks/books, documents, archives, downloads, and attachment-like links |
+| `data/pages.jsonl` | Page-level records with page kind, URL, and link totals |
+| `data/all.ndjson` | Combined stream containing every forum, thread, post, link, resource, and page record |
+| `index/*.csv` | Analysis-ready forum, thread, post, link, and resource indexes |
 
 The JSONL files preserve nested metadata without flattening. `body_text` excludes signatures, edit notes,
-and footer chrome; `body_html` keeps the raw content HTML. Attachment entries preserve names and URLs,
-but binary attachments are not downloaded automatically.
+and footer chrome; `body_html` keeps the raw content HTML. Whole-board mode follows forum pagination,
+thread pagination, and every accessible thread discovered in every forum. Link records preserve visible text,
+source context, internal/external status, and resource classification. Attachment, PDF, book, and document
+URLs are recorded as metadata; binary files are not downloaded automatically.
 
 Existing NDJSON downloads can be reorganized with `python3 tools/ndjson_to_archive.py old.ndjson organized.zip`.
 The converter preserves the original combined stream and creates the same typed JSONL, CSV, and metadata
@@ -66,7 +71,8 @@ current site plus synthetic edge-case fixtures.
 `background/sw.js` parses robots directives and Content-Signal declarations and performs size-capped
 UTF-8-safe downloads. `content/content.js` performs same-origin authenticated fetching, polite delay
 and jitter, wildcard-aware Disallow/Allow enforcement, queue deduplication, ID-based record deduplication,
-request/page/thread caps, complete request diagnostics, and a ZIP archive builder with JSONL and CSV outputs. `popup/` exposes scope selection,
+full pagination traversal, per-page request diagnostics, link/resource extraction, and a ZIP archive builder
+with JSONL and CSV outputs. Leave max pages, max threads, and max requests at `0` for exhaustive mode. `popup/` exposes scope selection,
 caps, compliance acknowledgement, self-test, live progress, and stop controls. Progress and a bounded
 resume mirror are stored in `chrome.storage.local`; a new crawl starts cleanly rather than silently
 mixing old output with a new run.
@@ -76,7 +82,7 @@ mixing old output with a new run.
 From this directory, run `node tests/test_parse.js` to validate the live homepage, live forum, and live
 thread fixtures together with synthetic cases for pagination, redirects, sticky and locked rows,
 localized counts, canonical URLs, missing post IDs, quotes, attachments, edits, signatures, deleted
-posts, ignored posts, and login walls. Run `node tests/test_compliance.js` to validate robots groups,
+posts, ignored posts, login walls, outbound links, and PDF/book/document/archive classification. Run `node tests/test_compliance.js` to validate robots groups,
 Allow-overrides, crawl delay, sitemaps, content signals, Article 4 reservations, and malformed input.
 The extension JavaScript files are also checked with `node --check`, and the manifest is validated as
 Manifest V3 with the WizardForums host restriction.

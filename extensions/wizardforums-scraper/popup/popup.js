@@ -55,7 +55,7 @@ async function refreshProgress() {
   const status = p.running ? 'running' : (p.done ? 'done' : 'idle');
   const parts = [status,
     'forums ' + (c.forums || 0), 'threads ' + (c.threads || 0), 'posts ' + (c.posts || 0),
-    'pages ' + (c.pages || 0), 'queue ' + (p.queue || 0)];
+    'links ' + (c.links || 0), 'resources ' + (c.resources || 0), 'pages ' + (c.pages || 0), 'queue ' + (p.queue || 0)];
   if (c.errors) parts.push('errors ' + c.errors);
   if (c.skipped_disallow) parts.push('skipped(disallow) ' + c.skipped_disallow);
   if (p.archive && p.archive.filename) {

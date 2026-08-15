@@ -72,10 +72,23 @@ check('thread parser extracts posts, quotes, attachments, signature removal, edi
   assert.doesNotMatch(r.posts[0].body_text, /sig|bad/);
   assert.equal(r.posts[0].quotes[0].source_post, '99');
   assert.equal(r.posts[0].attachments[0].url, 'https://wizardforums.com/attachments/a.pdf');
+  assert.ok(r.posts[0].links.some((x) => x.url.endsWith('/attachments/a.pdf') && x.resource_type === 'pdf'));
+  assert.equal(r.page_links.some((x) => x.url.endsWith('/attachments/a.pdf')), true);
   assert.equal(r.posts[0].reactions_count, 3);
   assert.equal(r.posts[0].edited, true);
   assert.equal(r.posts[1].deleted, true);
   assert.equal(r.pageNav.current, 2);
+});
+
+check('link parser classifies PDFs, books, documents, archives, and external links', () => {
+  const d = doc('<div><a href="/files/ritual.pdf">Ritual PDF</a><a href="https://example.com/book.epub">Book</a><a href="/download/manual.docx">Manual</a><a href="/files/archive.zip">Download</a><a href="mailto:test@example.com">Email</a></div>');
+  const links = XF.parseLinks(d, 'https://wizardforums.com/forums/x.9/');
+  assert.equal(links.length, 4);
+  assert.equal(links.find((x) => x.url.endsWith('ritual.pdf')).resource_type, 'pdf');
+  assert.equal(links.find((x) => x.url.endsWith('book.epub')).resource_type, 'ebook');
+  assert.equal(links.find((x) => x.url.endsWith('manual.docx')).resource_type, 'document');
+  assert.equal(links.find((x) => x.url.endsWith('archive.zip')).resource_type, 'archive');
+  assert.equal(links.find((x) => x.url.includes('example.com')).external, true);
 });
 
 check('login wall is detected without false positives on populated posts', () => {

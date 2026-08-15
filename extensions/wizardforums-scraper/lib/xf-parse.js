@@ -160,6 +160,35 @@
     return { threads: threads, pageNav: parsePageNav(doc, baseUrl) };
   }
 
+  // ---------- links and downloadable resources ----------
+  function classifyResource(url, label) {
+    const value = (String(url || '') + ' ' + String(label || '')).toLowerCase();
+    const path = String(url || '').split(/[?#]/)[0];
+    const ext = (path.match(/\.([a-z0-9]{2,8})$/i) || [])[1] || '';
+    if (ext === 'pdf' || /\bpdf\b/.test(value)) return 'pdf';
+    if (/\.(doc|docx|odt|rtf|txt|xls|xlsx|ppt|pptx)$/.test(path)) return 'document';
+    if (/\b(ebook|e-book|book|novel|grimoire|manual)\b/.test(value) || /\.(epub|mobi|azw|azw3|fb2)$/.test(path)) return 'ebook';
+    if (/\.(zip|rar|7z|tar|gz|iso)$/.test(path)) return 'archive';
+    if (/\b(download|attachment|file|upload)\b/.test(value)) return 'download';
+    return null;
+  }
+  function parseLinks(root, baseUrl, context) {
+    const links = [];
+    for (const a of qa(root, 'a[href], area[href]')) {
+      const href = attr(a, 'href');
+      const url = absUrl(href, baseUrl);
+      if (!url || /^(javascript|mailto|tel):/i.test(href || '')) continue;
+      const text = txt(a);
+      const resource_type = classifyResource(url, text + ' ' + attr(a, 'title') + ' ' + attr(a, 'download'));
+      links.push({
+        url, text: text || null, title: attr(a, 'title') || null, rel: attr(a, 'rel') || null,
+        download: attr(a, 'download') || null, external: !/^https?:\/\/wizardforums\.com\//i.test(url),
+        resource_type, context: context || null,
+      });
+    }
+    return links;
+  }
+
   // ---------- thread page (posts) ----------
   function parseThread(doc, baseUrl) {
     const wall = isLoginWall(first(doc, ['.p-body-content', '.p-body', 'body']) || doc);
@@ -222,6 +251,7 @@
           name: txt(first(a, ['.file-name'])) || txt(a) || null,
           url: absUrl(attr(a, 'href'), baseUrl) || null,
         })).filter((x) => x.url),
+        links: parseLinks(art, baseUrl, { type: 'post', post_id: pid, thread_url: thread.url }),
         reactions_count: (function () {
           const r = first(art, ['.reactionsBar-link', '.sv-rating-count']);
           if (!r) return 0;
@@ -231,7 +261,8 @@
         ignored: /message--ignored|is-ignored/.test(cls),
       });
     }
-    return { thread, posts, pageNav: parsePageNav(doc, baseUrl), loginWall: wall };
+    return { thread, posts, pageNav: parsePageNav(doc, baseUrl), loginWall: wall,
+      page_links: parseLinks(doc, baseUrl, { type: 'thread_page', thread_url: thread.url }) };
   }
 
   // post body text WITHOUT signature / edit note / quoted blocks removed? keep quotes inline but
@@ -294,7 +325,7 @@
 
   return {
     absUrl, idFromUrl, slugFromUrl, intFrom, parseTime, detectLoggedIn, isLoginWall,
-    parseBoardIndex, parseForumNode, parseThread, parsePageNav, bodyText,
+    parseBoardIndex, parseForumNode, parseThread, parsePageNav, parseLinks, classifyResource, bodyText,
     selftest, detectPageType,
   };
 });

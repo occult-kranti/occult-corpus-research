@@ -7,13 +7,13 @@
   window.__wfScraperLoaded = true;
   const XF = window.XFParse;
   const ORIGIN = 'https://wizardforums.com';
-  const VERSION = '2.0.0';
+  const VERSION = '2.1.0';
 
   const S = {
     running: false, stop: false, opts: null, compliance: null,
-    queue: [], queued: new Set(), visited: new Set(), seenThreads: new Set(), seenPosts: new Set(),
-    records: { forums: [], threads: [], posts: [], all: [] }, requestLog: [], skipped: [],
-    stamp: '', counts: { forums: 0, threads: 0, posts: 0, pages: 0, errors: 0, skipped_disallow: 0 },
+    queue: [], queued: new Set(), visited: new Set(), seenThreads: new Set(), seenPosts: new Set(), seenLinks: new Set(), seenResources: new Set(),
+    records: { forums: [], threads: [], posts: [], links: [], resources: [], pages: [], all: [] }, requestLog: [], skipped: [],
+    stamp: '', counts: { forums: 0, threads: 0, posts: 0, links: 0, resources: 0, pages: 0, errors: 0, skipped_disallow: 0 },
     lastError: '', archive: null,
   };
 
@@ -73,6 +73,9 @@
     if (out.type === 'forum') { S.records.forums.push(out); S.counts.forums += 1; }
     else if (out.type === 'thread') { S.records.threads.push(out); S.counts.threads += 1; }
     else if (out.type === 'post') { S.records.posts.push(out); S.counts.posts += 1; }
+    else if (out.type === 'link') { S.records.links.push(out); S.counts.links += 1; }
+    else if (out.type === 'resource') { S.records.resources.push(out); S.counts.resources += 1; }
+    else if (out.type === 'page') S.records.pages.push(out);
   }
 
   function enqueue(url, kind) {
@@ -88,7 +91,24 @@
     S.queue.sort((a, b) => a.priority - b.priority);
   }
 
+  function addPageLinks(d, url, kind, context) {
+    const links = XF.parseLinks(d, url, { type: kind + '_page', page_url: url, ...(context || {}) });
+    emit({ type: 'page', url, kind, link_count: links.length, scraped_at: isoNow() });
+    for (const link of links) addLink(link, { source_url: url, page_kind: kind, ...(context || {}) });
+  }
+  function addLink(link, context) {
+    const out = Object.assign({ type: 'link', link_url: link.url, link_text: link.text, link_title: link.title,
+      rel: link.rel, download_name: link.download, external: link.external, resource_type: link.resource_type || null }, context || {});
+    const key = [out.source_url || '', out.post_id || '', out.page_kind || '', out.link_url || ''].join('|');
+    if (!out.link_url || S.seenLinks.has(key)) return;
+    S.seenLinks.add(key); emit(out);
+    if (link.resource_type) {
+      const rkey = key + '|' + link.resource_type;
+      if (!S.seenResources.has(rkey)) { S.seenResources.add(rkey); emit(Object.assign({}, out, { type: 'resource' })); }
+    }
+  }
   async function handleIndex(d, url) {
+    addPageLinks(d, url, 'index');
     for (const f of XF.parseBoardIndex(d, url).forums) {
       emit(Object.assign({ type: 'forum' }, f, { source_url: url }));
       enqueue(f.url, 'forum');
@@ -96,6 +116,7 @@
     }
   }
   async function handleForum(d, url) {
+    addPageLinks(d, url, 'forum');
     const parsed = XF.parseForumNode(d, url);
     for (const t of parsed.threads) {
       if (t.id && S.seenThreads.has(t.id)) continue;
@@ -107,6 +128,11 @@
   }
   async function handleThread(d, url) {
     const parsed = XF.parseThread(d, url);
+    for (const link of (parsed.page_links || [])) addLink(link, { source_url: url, thread_id: parsed.thread.id, thread_title: parsed.thread.title, page_kind: 'thread_page' });
+    if (parsed.thread.id && !S.seenThreads.has(parsed.thread.id)) {
+      S.seenThreads.add(parsed.thread.id);
+      emit(Object.assign({ type: 'thread' }, parsed.thread, { source_url: url, discovered_from: 'thread_page' }));
+    }
     if (parsed.loginWall) S.lastError = 'login wall: ' + url + ' (are you logged in?)';
     for (const p of parsed.posts) {
       const key = p.id || (url + '#' + (p.post_number || p.author || 'unknown'));
@@ -121,6 +147,7 @@
         attachment_count: Array.isArray(p.attachments) ? p.attachments.length : 0,
         has_reactions: Number(p.reactions_count || 0) > 0,
       }));
+      for (const link of (p.links || [])) addLink(link, { source_url: url, post_id: p.id, thread_id: parsed.thread.id, thread_title: parsed.thread.title, post_number: p.post_number, page_kind: 'thread' });
     }
     if (parsed.pageNav.nextUrl && withinPageCap(parsed.pageNav)) enqueue(parsed.pageNav.nextUrl, 'thread');
   }
@@ -128,23 +155,26 @@
 
   function archiveEntries() {
     const crawledAt = isoNow();
-    const crawl = { schema_version: '2.0', scraper_version: VERSION, archive_created_at: crawledAt,
+    const crawl = { schema_version: '2.1', scraper_version: VERSION, archive_created_at: crawledAt,
       crawl_started_at: S.stamp, current_url: location.href, scope: S.opts.scope, options: S.opts,
-      counts: S.counts, queue_remaining: S.queue.length, stopped: S.stop, last_error: S.lastError,
+      counts: S.counts, queue_remaining: S.queue.length, visited_pages: S.visited.size, stopped: S.stop, last_error: S.lastError,
       page_type: XF.detectPageType(location.href), selftest: XF.selftest(document, location.href) };
-    const errors = { schema_version: '2.0', errors: S.requestLog.filter((x) => x.error || x.ok === false),
+    const errors = { schema_version: '2.1', errors: S.requestLog.filter((x) => x.error || x.ok === false),
       skipped: S.skipped, last_error: S.lastError, stopped: S.stop, generated_at: crawledAt };
-    const schema = { schema_version: '2.0', description: 'WizardForums organized scrape archive', record_types: {
-      forum: 'data/forums.jsonl', thread: 'data/threads.jsonl', post: 'data/posts.jsonl' },
-      compatibility: 'data/all.ndjson is the combined record stream; every data record has source_url, scraped_at, and scraper_version.' };
-    const readme = 'WizardForums Scraper archive\n===========================\n\n'
-      + 'This ZIP contains structured forum, thread, and post metadata captured from a session-based crawl.\n'
-      + 'Open metadata/crawl.json first. Use data/*.jsonl for typed records and index/*.csv for spreadsheets.\n'
-      + 'Attachments are preserved as metadata URLs; binary files are not downloaded automatically.\n\n'
-      + 'The archive reflects only content visible to the authenticated browser session and the selected scope.\n';
+    const schema = { schema_version: '2.1', description: 'WizardForums full-board analysis archive', record_types: {
+      forum: 'data/forums.jsonl', thread: 'data/threads.jsonl', post: 'data/posts.jsonl', link: 'data/links.jsonl', resource: 'data/resources.jsonl', page: 'data/pages.jsonl' },
+      compatibility: 'data/all.ndjson contains every typed record; every record has scraped_at and scraper_version.' };
+    const readme = 'WizardForums Scraper full-board analysis archive\n===============================================\n\n'
+      + 'This ZIP contains all accessible forums, paginated forum pages, threads, paginated thread pages, posts, replies, links, and resource metadata discovered during the crawl.\n'
+      + 'Open metadata/crawl.json first. Use data/*.jsonl for lossless typed records and index/*.csv for spreadsheets, pandas, SQL imports, and graph analysis.\n'
+      + 'Links and resources retain their source post/thread/page, visible text, external/internal status, and classified resource type.\n'
+      + 'PDFs, books, ebooks, documents, archives, and attachments are recorded as URLs and metadata; binary files are not downloaded automatically.\n\n'
+      + 'The archive reflects only content visible to the authenticated browser session and the selected scope. A full-board crawl can be large and should be allowed to finish.\n';
     const forumCols = ['id', 'slug', 'url', 'title', 'description', 'threads_count', 'messages_count', 'sub_forums', 'source_url', 'scraped_at'];
     const threadCols = ['id', 'url', 'title', 'slug', 'prefix', 'author', 'author_id', 'author_url', 'forum', 'created', 'reply_count', 'view_count', 'last_post', 'sticky', 'locked', 'redirect', 'source_url', 'scraped_at'];
-    const postCols = ['id', 'thread_id', 'thread_title', 'forum', 'author', 'author_id', 'post_number', 'posted_at', 'body_text', 'body_html', 'body_text_length', 'body_html_length', 'quote_count', 'attachment_count', 'attachments', 'reactions_count', 'has_reactions', 'edited', 'deleted', 'ignored', 'source_url', 'scraped_at'];
+    const postCols = ['id', 'thread_id', 'thread_title', 'forum', 'author', 'author_id', 'post_number', 'posted_at', 'body_text', 'body_html', 'body_text_length', 'body_html_length', 'quote_count', 'attachment_count', 'attachments', 'links', 'reactions_count', 'has_reactions', 'edited', 'deleted', 'ignored', 'source_url', 'scraped_at'];
+    const linkCols = ['link_url', 'link_text', 'link_title', 'rel', 'download_name', 'external', 'resource_type', 'thread_id', 'post_id', 'thread_title', 'post_number', 'page_kind', 'source_url', 'scraped_at'];
+    const resourceCols = ['link_url', 'link_text', 'resource_type', 'download_name', 'external', 'thread_id', 'post_id', 'thread_title', 'post_number', 'source_url', 'scraped_at'];
     return [
       { name: 'README.txt', data: readme },
       { name: 'metadata/crawl.json', data: json(crawl) },
@@ -155,10 +185,15 @@
       { name: 'data/forums.jsonl', data: jsonl(S.records.forums) },
       { name: 'data/threads.jsonl', data: jsonl(S.records.threads) },
       { name: 'data/posts.jsonl', data: jsonl(S.records.posts) },
+      { name: 'data/links.jsonl', data: jsonl(S.records.links) },
+      { name: 'data/resources.jsonl', data: jsonl(S.records.resources) },
+      { name: 'data/pages.jsonl', data: jsonl(S.records.pages) },
       { name: 'data/all.ndjson', data: jsonl(S.records.all) },
       { name: 'index/forums.csv', data: csv(S.records.forums, forumCols) },
       { name: 'index/threads.csv', data: csv(S.records.threads, threadCols) },
       { name: 'index/posts.csv', data: csv(S.records.posts, postCols) },
+      { name: 'index/links.csv', data: csv(S.records.links, linkCols) },
+      { name: 'index/resources.csv', data: csv(S.records.resources, resourceCols) },
     ];
   }
 
@@ -183,12 +218,12 @@
         if (item.useDocument) { d = document; logRequest({ url: item.url, kind: item.kind, status: 'current-document', ok: true, bytes: null, duration_ms: 0 }); }
         else { if (!firstFetch) await sleep(delay + Math.floor(delay * 0.25 * Math.random())); firstFetch = false; d = await fetchDoc(item.url, item.kind); }
         S.counts.pages += 1;
-        const before = { forums: S.counts.forums, threads: S.counts.threads, posts: S.counts.posts };
+        const before = { forums: S.counts.forums, threads: S.counts.threads, posts: S.counts.posts, links: S.counts.links, resources: S.counts.resources };
         if (item.kind === 'index') await handleIndex(d, item.url);
         else if (item.kind === 'forum') await handleForum(d, item.url);
         else if (item.kind === 'thread') await handleThread(d, item.url);
         const request = [...S.requestLog].reverse().find((x) => x.url === item.url && x.kind === item.kind);
-        if (request) request.records_added = { forums: S.counts.forums - before.forums, threads: S.counts.threads - before.threads, posts: S.counts.posts - before.posts };
+        if (request) request.records_added = { forums: S.counts.forums - before.forums, threads: S.counts.threads - before.threads, posts: S.counts.posts - before.posts, links: S.counts.links - before.links, resources: S.counts.resources - before.resources };
       } catch (e) { S.counts.errors += 1; S.lastError = String((e && e.message) || e); }
       if (S.counts.pages % 5 === 0) mirror();
       progress();
@@ -226,9 +261,9 @@
         S.opts = Object.assign({ scope: 'current', delayMs: 4000, includePosts: true, maxPagesPer: 0, maxThreads: 0, maxRequests: 0 }, msg.opts || {});
         const scopeError = validateScopeStart();
         if (scopeError) { sendResponse({ ok: false, error: scopeError }); return; }
-        S.queue = []; S.queued = new Set(); S.visited = new Set(); S.seenThreads = new Set(); S.seenPosts = new Set();
-        S.records = { forums: [], threads: [], posts: [], all: [] }; S.requestLog = []; S.skipped = [];
-        S.counts = { forums: 0, threads: 0, posts: 0, pages: 0, errors: 0, skipped_disallow: 0 }; S.lastError = '';
+        S.queue = []; S.queued = new Set(); S.visited = new Set(); S.seenThreads = new Set(); S.seenPosts = new Set(); S.seenLinks = new Set(); S.seenResources = new Set();
+        S.records = { forums: [], threads: [], posts: [], links: [], resources: [], pages: [], all: [] }; S.requestLog = []; S.skipped = [];
+        S.counts = { forums: 0, threads: 0, posts: 0, links: 0, resources: 0, pages: 0, errors: 0, skipped_disallow: 0 }; S.lastError = '';
         seedQueue(); run(); sendResponse({ ok: true });
       });
       return true;
