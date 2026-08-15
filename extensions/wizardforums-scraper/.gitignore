@@ -1,0 +1,4 @@
+node_modules/
+
+# Local-only debug files
+tests/debug_*.js
