@@ -1,0 +1,18 @@
+{
+  "name": "wizardforums-scraper",
+  "version": "1.0.0",
+  "description": "A personal, rate-limited, **session-based** archiver for `wizardforums.com` (XenForo 2.x). It runs as a content script in *your own logged-in tab*, so it sees exactly what you can (post bodies there are members-only), crawls forums → threads → posts, and streams structured **NDJSON** to your Downloads.",
+  "main": "index.js",
+  "directories": {
+    "lib": "lib"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "linkedom": "^0.18.13"
+  }
+}
