@@ -23,5 +23,9 @@ assert.equal(api.canonicalCrawlUrl('https://wizardforums.com/threads/a.123/unrea
 assert.equal(api.canonicalCrawlUrl('https://wizardforums.com/threads/a.123/post-99/?utm_source=x#top'), 'https://wizardforums.com/threads/a.123/');
 assert.equal(api.canonicalCrawlUrl('https://wizardforums.com/forums/x.9/page-2/?fbclid=abc'), 'https://wizardforums.com/forums/x.9/page-2/');
 assert.equal(api.canonicalCrawlUrl('https://example.com/a'), 'https://example.com/a/');
-console.log('PASS canonical crawl URLs');
+assert.equal(api.isExcludedForum('https://wizardforums.com/forums/introductions.5/'), true);
+assert.equal(api.isExcludedForum('https://wizardforums.com/forums/introductions.5/page-2/'), true);
+assert.equal(api.isExcludedForum('https://wizardforums.com/forums/general-occult-discussion.9/'), false);
+assert.equal(api.isExcludedForum('https://wizardforums.com/forums/custom.99/', 'Introductions'), true);
+console.log('PASS canonical URLs and Introductions exclusion');
 console.log('All scheduler checks passed.');

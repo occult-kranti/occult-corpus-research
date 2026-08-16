@@ -2,6 +2,8 @@
 
 ## Scope
 
+The current release is **v2.4.0**.
+
 The supplied Manifest V3 extension was reviewed against the live WizardForums homepage, forum page, thread page, and robots policy. The extension remains a session-based scraper: it uses ordinary same-origin requests in the user’s current Chrome profile and does not bypass authentication, CAPTCHA, paywalls, or access controls.
 
 ## Implemented hardening
@@ -55,6 +57,12 @@ The archive chunking test suite passed together with parser, compliance, ZIP, an
 Version 2.3.0 replaces the fully serial request loop with a bounded worker pool. The popup defaults to two concurrent requests and caps user-configurable concurrency at three. A shared request clock, randomized pacing, minimum delay, and exponential backoff are used for retryable 403, 408, 425, 429, and 5xx responses. Session-specific `/unread` and `/post-N` URLs are canonicalized to stable thread URLs, and tracking parameters are removed before queue deduplication. Unrestricted concurrency is intentionally not used because it can increase 403 responses and make a crawl less complete rather than faster.
 
 Every configured checkpoint interval, the crawler downloads delta ZIPs containing only records added since the previous checkpoint, plus a checkpoint manifest with cumulative counts, queue state, and record cursors. The final export remains a complete snapshot. Checkpoint deltas are stored under `checkpoints/cp-NNN/` and can be merged with `tools/merge_checkpoints.py`. Chrome storage mirrors bounded progress and checkpoint cursors so a long crawl has recoverable evidence even if the final export is interrupted.
+
+## Introductions exclusion
+
+Version 2.4.0 excludes the forum identified on the live homepage as `Introductions`, URL `/forums/introductions.5/`. The exclusion is applied by forum ID, slug, title, and canonical URL before queueing, so its forum pages, pagination pages, and discovered threads are not fetched in Whole board mode. A direct This forum crawl of that forum is rejected with an explicit message. The omission is recorded in `skipped_excluded` progress and archive metadata.
+
+The v2.4.0 scheduler regression suite passed the exact Introductions URL, its pagination URL, a similarly named non-excluded forum, and title-based fallback matching.
 
 ## Live-site limitation
 

@@ -58,6 +58,7 @@ async function refreshProgress() {
     'links ' + (c.links || 0), 'resources ' + (c.resources || 0), 'pages ' + (c.pages || 0), 'queue ' + (p.queue || 0)];
   if (c.errors) parts.push('errors ' + c.errors);
   if (c.skipped_disallow) parts.push('skipped(disallow) ' + c.skipped_disallow);
+  if (c.skipped_excluded) parts.push('skipped(excluded) ' + c.skipped_excluded);
   if (p.concurrency) parts.push('workers ' + p.concurrency);
   if (p.archive && (p.archive.status === 'checkpoint_exporting' || p.archive.status === 'checkpoint_ready')) {
     parts.push('checkpoint ' + (p.archive.checkpoint || '?') + (p.archive.status === 'checkpoint_exporting' ? ' exporting' : ' ready'));

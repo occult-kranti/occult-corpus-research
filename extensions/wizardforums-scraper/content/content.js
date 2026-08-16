@@ -7,7 +7,8 @@
   window.__wfScraperLoaded = true;
   const XF = window.XFParse;
   const ORIGIN = 'https://wizardforums.com';
-  const VERSION = '2.3.0';
+  const VERSION = '2.4.0';
+  const EXCLUDED_FORUMS = new Set(['5', 'introductions', 'introductions.5']);
 
   const S = {
     running: false, stop: false, opts: null, compliance: null,
@@ -20,6 +21,14 @@
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+  function isExcludedForum(url, title) {
+    let path = '', id = '', slug = '';
+    try { path = new URL(url, ORIGIN).pathname.toLowerCase(); } catch (e) {}
+    const m = path.match(/\/forums\/([^/]+)\.(\d+)\/?/i);
+    if (m) { slug = m[1]; id = m[2]; }
+    const normalizedTitle = String(title || '').trim().toLowerCase();
+    return EXCLUDED_FORUMS.has(id) || EXCLUDED_FORUMS.has(slug) || EXCLUDED_FORUMS.has(slug + (id ? '.' + id : '')) || normalizedTitle === 'introductions';
+  }
   function canonicalCrawlUrl(url) {
     try {
       const u = new URL(url, ORIGIN); u.hash = '';
@@ -114,6 +123,7 @@
     if (!url) return;
     const u = canonicalCrawlUrl(url);
     if (!u || u.indexOf(ORIGIN) !== 0) return;
+    if (kind === 'forum' && isExcludedForum(u)) { S.counts.skipped_excluded += 1; S.skipped.push({ url: u, kind, reason: 'excluded_forum_introductions', at: isoNow() }); return; }
     if (S.visited.has(u) || S.queued.has(u)) return;
     if (disallowed(u)) { S.counts.skipped_disallow += 1; S.skipped.push({ url: u, kind, reason: 'robots_disallow', at: isoNow() }); return; }
     S.queued.add(u);
@@ -141,12 +151,14 @@
   async function handleIndex(d, url) {
     addPageLinks(d, url, 'index');
     for (const f of XF.parseBoardIndex(d, url).forums) {
+      if (isExcludedForum(f.url, f.title)) { S.counts.skipped_excluded += 1; S.skipped.push({ url: f.url, kind: 'forum', reason: 'excluded_forum_introductions', title: f.title, at: isoNow() }); continue; }
       emit(Object.assign({ type: 'forum' }, f, { source_url: url }));
       enqueue(f.url, 'forum');
-      for (const sf of (f.sub_forums || [])) enqueue(sf.url, 'forum');
+      for (const sf of (f.sub_forums || [])) if (!isExcludedForum(sf.url, sf.title)) enqueue(sf.url, 'forum');
     }
   }
   async function handleForum(d, url) {
+    if (isExcludedForum(url)) return;
     addPageLinks(d, url, 'forum');
     const parsed = XF.parseForumNode(d, url);
     for (const t of parsed.threads) {
@@ -325,6 +337,7 @@
     globalThis.__WF_TEST__.buildArchiveParts = buildArchiveParts;
     globalThis.__WF_TEST__.splitLargeEntry = splitLargeEntry;
     globalThis.__WF_TEST__.canonicalCrawlUrl = canonicalCrawlUrl;
+    globalThis.__WF_TEST__.isExcludedForum = isExcludedForum;
   }
 
   async function processItem(item, delay) {
@@ -383,6 +396,7 @@
     const type = XF.detectPageType(target);
     if (S.opts.scope === 'thread' && type !== 'thread') return 'Thread scope requires a thread page. Open a thread first.';
     if (S.opts.scope === 'forum' && type !== 'forum') return 'Forum scope requires a forum page. Open a forum first.';
+    if (S.opts.scope === 'forum' && isExcludedForum(target)) return 'The Introductions forum is excluded from this crawl.';
     return '';
   }
   function seedQueue() {
@@ -404,7 +418,7 @@
         if (scopeError) { sendResponse({ ok: false, error: scopeError }); return; }
         S.queue = []; S.queued = new Set(); S.visited = new Set(); S.seenThreads = new Set(); S.seenPosts = new Set(); S.seenLinks = new Set(); S.seenResources = new Set();
         S.records = { forums: [], threads: [], posts: [], links: [], resources: [], pages: [], all: [] }; S.requestLog = []; S.skipped = [];
-        S.counts = { forums: 0, threads: 0, posts: 0, links: 0, resources: 0, pages: 0, errors: 0, skipped_disallow: 0 }; S.lastError = ''; S.checkpointNo = 0; S.checkpointBusy = false; S.inFlight = 0; S.nextRequestAt = 0; S.consecutive403 = 0;
+        S.counts = { forums: 0, threads: 0, posts: 0, links: 0, resources: 0, pages: 0, errors: 0, skipped_disallow: 0, skipped_excluded: 0 }; S.lastError = ''; S.checkpointNo = 0; S.checkpointBusy = false; S.inFlight = 0; S.nextRequestAt = 0; S.consecutive403 = 0;
         seedQueue(); run(); sendResponse({ ok: true });
       });
       return true;

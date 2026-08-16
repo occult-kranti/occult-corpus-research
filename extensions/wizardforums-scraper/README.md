@@ -11,7 +11,7 @@ members-only), crawls forums → threads → posts, and downloads one organized 
 
 ## Use
 - The popup first shows the **site policy check** (see Compliance below). Acknowledge if prompted.
-- Pick a **Scope**: Current page · This thread · This forum · Whole board.
+- Pick a **Scope**: Current page · This thread · This forum · Whole board. Whole-board mode intentionally excludes the **Introductions** forum (`/forums/introductions.5/`) and its pagination.
 - Set the **delay** (default 4000 ms — be polite), optional caps, **concurrent requests** (default 2, maximum 3), and **checkpoint frequency** (default every 100 pages).
 - **Start.** Keep the tab open. Progress shows live counts and checkpoint status; while the crawl runs, the extension downloads
   checkpoint delta ZIPs under `Downloads/WizardForums/wf-<timestamp>/checkpoints/`; when the crawl finishes it downloads
@@ -43,6 +43,8 @@ Each crawl produces one ZIP when it fits within the browser download limit. Larg
 | `data/pages.jsonl` | Page-level records with page kind, URL, and link totals |
 | `data/all.ndjson` | Combined stream containing every forum, thread, post, link, resource, and page record |
 | `index/*.csv` | Analysis-ready forum, thread, post, link, and resource indexes |
+
+Whole-board archives omit the Introductions forum by design. The omission is recorded in `metadata/crawl.json` and `metadata/errors.json` as `skipped_excluded`; a direct This forum crawl of Introductions is rejected rather than silently collecting it.
 
 The JSONL files preserve nested metadata without flattening. `body_text` excludes signatures, edit notes,
 and footer chrome; `body_html` keeps the raw content HTML. Whole-board mode follows forum pagination,
@@ -76,7 +78,7 @@ current site plus synthetic edge-case fixtures.
 `background/sw.js` parses robots directives and Content-Signal declarations and performs size-capped
 UTF-8-safe downloads. `content/content.js` performs same-origin authenticated fetching, polite delay
 and jitter, wildcard-aware Disallow/Allow enforcement, queue deduplication, ID-based record deduplication,
-full pagination traversal, per-page request diagnostics, link/resource extraction, adaptive 403/429/5xx retries, canonicalization of session-specific `/unread` URLs, bounded worker concurrency, durable checkpoint deltas, and a size-aware multi-part ZIP archive builder
+full pagination traversal, per-page request diagnostics, link/resource extraction, adaptive 403/429/5xx retries, canonicalization of session-specific `/unread` URLs, bounded worker concurrency, durable checkpoint deltas, Introductions-forum exclusion, and a size-aware multi-part ZIP archive builder
 with JSONL and CSV outputs. Each part is kept below the browser-safe raw ZIP target and preserves complete JSONL/CSV records. Leave max pages, max threads, and max requests at `0` for exhaustive mode. `popup/` exposes scope selection,
 caps, compliance acknowledgement, self-test, live progress, and stop controls. Progress, checkpoint cursors, and a bounded resume mirror are stored in `chrome.storage.local`; checkpoint ZIPs are append-only deltas and the final archive is a complete snapshot. A new crawl starts cleanly rather than silently mixing old output with a new run.
 
