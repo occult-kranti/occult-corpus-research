@@ -7,17 +7,36 @@
   window.__wfScraperLoaded = true;
   const XF = window.XFParse;
   const ORIGIN = 'https://wizardforums.com';
-  const VERSION = '2.1.0';
+  const VERSION = '2.3.0';
 
   const S = {
     running: false, stop: false, opts: null, compliance: null,
     queue: [], queued: new Set(), visited: new Set(), seenThreads: new Set(), seenPosts: new Set(), seenLinks: new Set(), seenResources: new Set(),
     records: { forums: [], threads: [], posts: [], links: [], resources: [], pages: [], all: [] }, requestLog: [], skipped: [],
     stamp: '', counts: { forums: 0, threads: 0, posts: 0, links: 0, resources: 0, pages: 0, errors: 0, skipped_disallow: 0 },
-    lastError: '', archive: null,
+    lastError: '', archive: null, checkpointNo: 0, checkpointBusy: false, checkpointCursor: { forums: 0, threads: 0, posts: 0, links: 0, resources: 0, pages: 0, all: 0, requests: 0 },
+    inFlight: 0, nextRequestAt: 0, consecutive403: 0,
   };
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+  function canonicalCrawlUrl(url) {
+    try {
+      const u = new URL(url, ORIGIN); u.hash = '';
+      // /unread is a session-specific cursor, not a stable crawl page. Keep numbered pages.
+      u.pathname = u.pathname.replace(/\/unread\/?$/i, '/').replace(/\/post-\d+\/?$/i, '/');
+      if (u.pathname !== '/' && !u.pathname.endsWith('/')) u.pathname += '/';
+      for (const k of Array.from(u.searchParams.keys())) if (/^(sid|_xfToken|fbclid)$/i.test(k) || /^utm_/i.test(k)) u.searchParams.delete(k);
+      return u.href;
+    } catch (e) { return ''; }
+  }
+  async function paceRequest(baseDelay) {
+    const now = Date.now();
+    const wait = Math.max(0, S.nextRequestAt - now);
+    if (wait) await sleep(wait);
+    const jitter = Math.floor(Math.random() * Math.max(50, baseDelay * 0.25));
+    S.nextRequestAt = Date.now() + baseDelay + jitter;
+  }
   const nowStamp = () => new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   const isoNow = () => new Date().toISOString();
   const json = (x) => JSON.stringify(x, null, 2) + '\n';
@@ -52,19 +71,32 @@
 
   function logRequest(entry) { S.requestLog.push(Object.assign({ at: isoNow() }, entry)); }
   async function fetchDoc(url, kind) {
-    const started = performance.now();
-    try {
-      const resp = await fetch(url, { credentials: 'same-origin' });
-      const html = await resp.text();
-      logRequest({ url, kind, status: resp.status, ok: resp.ok, bytes: html.length,
-        duration_ms: Math.round(performance.now() - started) });
-      if (!resp.ok) throw new Error('HTTP ' + resp.status + ' ' + url);
-      return new DOMParser().parseFromString(html, 'text/html');
-    } catch (e) {
-      logRequest({ url, kind, status: null, ok: false, bytes: 0,
-        duration_ms: Math.round(performance.now() - started), error: String((e && e.message) || e) });
-      throw e;
+    const maxAttempts = Number(S.opts && S.opts.retryAttempts) || 3;
+    const baseDelay = Math.max(Number(S.opts && S.opts.delayMs) || 1500, 750);
+    let lastError = null;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const started = performance.now();
+      try {
+        await paceRequest(baseDelay * (S.consecutive403 ? clamp(1 + S.consecutive403 * 0.5, 1, 4) : 1));
+        const resp = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
+        const html = await resp.text();
+        logRequest({ url, kind, status: resp.status, ok: resp.ok, bytes: html.length,
+          attempt, duration_ms: Math.round(performance.now() - started) });
+        if (resp.ok) { S.consecutive403 = 0; return new DOMParser().parseFromString(html, 'text/html'); }
+        const retryable = resp.status === 403 || resp.status === 408 || resp.status === 425 || resp.status === 429 || resp.status >= 500;
+        lastError = new Error('HTTP ' + resp.status + ' ' + url);
+        if (resp.status === 403) S.consecutive403 += 1;
+        if (!retryable || attempt >= maxAttempts) break;
+        await sleep(Math.min(30000, baseDelay * Math.pow(2, attempt - 1) + Math.floor(Math.random() * 500)));
+      } catch (e) {
+        lastError = e;
+        logRequest({ url, kind, status: null, ok: false, bytes: 0, attempt,
+          duration_ms: Math.round(performance.now() - started), error: String((e && e.message) || e) });
+        if (attempt >= maxAttempts) break;
+        await sleep(Math.min(30000, baseDelay * Math.pow(2, attempt - 1)));
+      }
     }
+    throw lastError || new Error('request failed: ' + url);
   }
 
   function emit(rec) {
@@ -80,9 +112,8 @@
 
   function enqueue(url, kind) {
     if (!url) return;
-    let u;
-    try { u = new URL(url, ORIGIN).href.split('#')[0]; } catch (e) { return; }
-    if (u.indexOf(ORIGIN) !== 0) return;
+    const u = canonicalCrawlUrl(url);
+    if (!u || u.indexOf(ORIGIN) !== 0) return;
     if (S.visited.has(u) || S.queued.has(u)) return;
     if (disallowed(u)) { S.counts.skipped_disallow += 1; S.skipped.push({ url: u, kind, reason: 'robots_disallow', at: isoNow() }); return; }
     S.queued.add(u);
@@ -155,13 +186,14 @@
 
   function archiveEntries() {
     const crawledAt = isoNow();
-    const crawl = { schema_version: '2.1', scraper_version: VERSION, archive_created_at: crawledAt,
-      crawl_started_at: S.stamp, current_url: location.href, scope: S.opts.scope, options: S.opts,
+    const crawl = { schema_version: '2.3', scraper_version: VERSION, archive_created_at: crawledAt,
+      crawl_started_at: S.stamp, current_url: location.href, scope: S.opts.scope, options: S.opts, scheduler: { concurrency: S.opts.concurrency, retry_attempts: S.opts.retryAttempts, checkpoint_every_pages: S.opts.checkpointEveryPages },
+      checkpoints: { count: S.checkpointNo, last: S.checkpointNo ? S.checkpointNo : null },
       counts: S.counts, queue_remaining: S.queue.length, visited_pages: S.visited.size, stopped: S.stop, last_error: S.lastError,
       page_type: XF.detectPageType(location.href), selftest: XF.selftest(document, location.href) };
-    const errors = { schema_version: '2.1', errors: S.requestLog.filter((x) => x.error || x.ok === false),
+    const errors = { schema_version: '2.3', errors: S.requestLog.filter((x) => x.error || x.ok === false),
       skipped: S.skipped, last_error: S.lastError, stopped: S.stop, generated_at: crawledAt };
-    const schema = { schema_version: '2.1', description: 'WizardForums full-board analysis archive', record_types: {
+    const schema = { schema_version: '2.3', description: 'WizardForums full-board analysis archive with checkpoint deltas', record_types: {
       forum: 'data/forums.jsonl', thread: 'data/threads.jsonl', post: 'data/posts.jsonl', link: 'data/links.jsonl', resource: 'data/resources.jsonl', page: 'data/pages.jsonl' },
       compatibility: 'data/all.ndjson contains every typed record; every record has scraped_at and scraper_version.' };
     const readme = 'WizardForums Scraper full-board analysis archive\n===============================================\n\n'
@@ -182,6 +214,7 @@
       { name: 'metadata/requests.jsonl', data: jsonl(S.requestLog) },
       { name: 'metadata/errors.json', data: json(errors) },
       { name: 'metadata/schema.json', data: json(schema) },
+      { name: 'metadata/checkpoints.json', data: json({ archive_id: S.stamp, checkpoint_count: S.checkpointNo, checkpoint_directory: 'checkpoints/', note: 'Checkpoint archives are deltas; apply them in order before the final snapshot.' }) },
       { name: 'data/forums.jsonl', data: jsonl(S.records.forums) },
       { name: 'data/threads.jsonl', data: jsonl(S.records.threads) },
       { name: 'data/posts.jsonl', data: jsonl(S.records.posts) },
@@ -237,58 +270,108 @@
     if (current.length || !parts.length) parts.push(current);
     return parts;
   }
-  async function downloadArchive() {
-    const base = 'WizardForums/wf-' + S.stamp;
-    const rawEntries = archiveEntries();
+  function sliceSince(kind) {
+    const start = S.checkpointCursor[kind] || 0;
+    const rows = kind === 'requests' ? S.requestLog : S.records[kind];
+    return rows.slice(start);
+  }
+  function checkpointEntries() {
+    const entries = [
+      { name: 'metadata/checkpoint.json', data: json({ schema_version: '2.3', archive_id: S.stamp, checkpoint: S.checkpointNo, created_at: isoNow(), counts: S.counts, queue_remaining: S.queue.length, visited_pages: S.visited.size, cursor: S.checkpointCursor, note: 'Checkpoint contains only records added since the previous checkpoint; apply in order.' }) },
+      { name: 'metadata/requests.jsonl', data: jsonl(sliceSince('requests')) },
+      { name: 'data/forums.jsonl', data: jsonl(sliceSince('forums')) },
+      { name: 'data/threads.jsonl', data: jsonl(sliceSince('threads')) },
+      { name: 'data/posts.jsonl', data: jsonl(sliceSince('posts')) },
+      { name: 'data/links.jsonl', data: jsonl(sliceSince('links')) },
+      { name: 'data/resources.jsonl', data: jsonl(sliceSince('resources')) },
+      { name: 'data/pages.jsonl', data: jsonl(sliceSince('pages')) },
+      { name: 'data/all.ndjson', data: jsonl(sliceSince('all')) },
+    ];
+    return entries;
+  }
+  async function downloadEntries(rawEntries, base, kind) {
     const parts = buildArchiveParts(rawEntries);
     const partNames = parts.map((_, i) => base + '-part-' + String(i + 1).padStart(3, '0') + '-of-' + String(parts.length).padStart(3, '0') + '.zip');
-    const manifest = { schema_version: '2.2', archive_id: S.stamp, part_count: parts.length,
-      parts: partNames.map((name, i) => ({ part: i + 1, filename: name, entry_count: parts[i].length })),
-      logical_entry_count: rawEntries.length, counts: S.counts, created_at: isoNow(), note: 'Join by extracting all parts into one directory; JSONL/CSV files with .part-NNN suffix are ordered chunks.' };
+    const manifest = { schema_version: '2.3', archive_id: S.stamp, export_kind: kind, checkpoint: kind === 'checkpoint' ? S.checkpointNo : null,
+      part_count: parts.length, parts: partNames.map((name, i) => ({ part: i + 1, filename: name, entry_count: parts[i].length })),
+      logical_entry_count: rawEntries.length, counts: S.counts, created_at: isoNow(), note: 'Extract all parts in order. Checkpoints contain deltas; final parts contain the complete snapshot.' };
     const downloaded = []; let totalBytes = 0;
     for (let i = 0; i < parts.length; i += 1) {
       const partEntries = [{ name: 'metadata/archive_manifest.json', data: json(manifest) },
-        { name: 'metadata/part.json', data: json({ archive_id: S.stamp, part: i + 1, part_count: parts.length, filename: partNames[i] }) }, ...parts[i]];
-      progress({ archive: { status: 'exporting', part: i + 1, parts: parts.length, filename: partNames[i] } });
+        { name: 'metadata/part.json', data: json({ archive_id: S.stamp, export_kind: kind, checkpoint: kind === 'checkpoint' ? S.checkpointNo : null, part: i + 1, part_count: parts.length, filename: partNames[i] }) }, ...parts[i]];
+      progress({ archive: { status: kind === 'checkpoint' ? 'checkpoint_exporting' : 'exporting', checkpoint: kind === 'checkpoint' ? S.checkpointNo : null, part: i + 1, parts: parts.length, filename: partNames[i] } });
       const r = await chrome.runtime.sendMessage({ type: 'WF_DOWNLOAD_ARCHIVE', filename: partNames[i], entries: partEntries });
       if (!r || !r.ok) throw new Error((r && r.error) || 'archive part download failed');
       downloaded.push({ filename: partNames[i], bytes: r.bytes || 0 }); totalBytes += r.bytes || 0;
     }
-    S.archive = { status: 'ready', filename: partNames[0], parts: downloaded, part_count: parts.length, bytes: totalBytes, downloaded_at: isoNow() };
+    return { parts: downloaded, part_count: parts.length, bytes: totalBytes, manifest };
+  }
+  async function downloadCheckpoint() {
+    if (S.checkpointBusy || !S.running || S.stop) return;
+    S.checkpointBusy = true;
+    try {
+      const result = await downloadEntries(checkpointEntries(), 'WizardForums/wf-' + S.stamp + '/checkpoints/cp-' + String(S.checkpointNo).padStart(4, '0'), 'checkpoint');
+      for (const key of Object.keys(S.checkpointCursor)) S.checkpointCursor[key] = key === 'requests' ? S.requestLog.length : S.records[key].length;
+      await chrome.storage.local.set({ wf_checkpoint: { archive_id: S.stamp, checkpoint: S.checkpointNo, cursor: S.checkpointCursor, counts: S.counts, queue_remaining: S.queue.length, parts: result.parts, at: Date.now() } });
+      progress({ archive: { status: 'checkpoint_ready', checkpoint: S.checkpointNo, parts: result.parts } });
+    } finally { S.checkpointBusy = false; }
+  }
+  async function downloadArchive() {
+    const result = await downloadEntries(archiveEntries(), 'WizardForums/wf-' + S.stamp + '/final', 'final');
+    S.archive = { status: 'ready', filename: result.parts[0] && result.parts[0].filename, parts: result.parts, part_count: result.part_count, bytes: result.bytes, downloaded_at: isoNow() };
   }
 
   if (typeof globalThis !== 'undefined' && globalThis.__WF_TEST__) {
     globalThis.__WF_TEST__.buildArchiveParts = buildArchiveParts;
     globalThis.__WF_TEST__.splitLargeEntry = splitLargeEntry;
+    globalThis.__WF_TEST__.canonicalCrawlUrl = canonicalCrawlUrl;
   }
 
+  async function processItem(item, delay) {
+    if (!item || S.stop || (S.opts.maxRequests && S.counts.pages >= S.opts.maxRequests)) return;
+    if (S.visited.has(item.url)) return;
+    S.visited.add(item.url); S.inFlight += 1;
+    try {
+      let d;
+      if (item.useDocument) { d = document; logRequest({ url: item.url, kind: item.kind, status: 'current-document', ok: true, bytes: null, duration_ms: 0 }); }
+      else d = await fetchDoc(item.url, item.kind);
+      S.counts.pages += 1;
+      const before = { forums: S.counts.forums, threads: S.counts.threads, posts: S.counts.posts, links: S.counts.links, resources: S.counts.resources };
+      if (item.kind === 'index') await handleIndex(d, item.url);
+      else if (item.kind === 'forum') await handleForum(d, item.url);
+      else if (item.kind === 'thread') await handleThread(d, item.url);
+      const request = [...S.requestLog].reverse().find((x) => x.url === item.url && x.kind === item.kind);
+      if (request) request.records_added = { forums: S.counts.forums - before.forums, threads: S.counts.threads - before.threads, posts: S.counts.posts - before.posts, links: S.counts.links - before.links, resources: S.counts.resources - before.resources };
+    } catch (e) { S.counts.errors += 1; S.lastError = String((e && e.message) || e); }
+    finally { S.inFlight = Math.max(0, S.inFlight - 1); }
+  }
   async function run() {
-    S.running = true; S.stop = false; S.archive = null; S.stamp = nowStamp(); progress();
-    const delay = Math.max(S.opts.delayMs || 4000, ((S.compliance && S.compliance.crawlDelay) || 0) * 1000);
-    let firstFetch = true;
-    while (S.queue.length && !S.stop) {
-      if (S.opts.maxRequests && S.counts.pages >= S.opts.maxRequests) { S.lastError = 'reached maxRequests cap'; break; }
-      const item = S.queue.shift(); S.queued.delete(item.url);
-      if (S.visited.has(item.url)) continue;
-      S.visited.add(item.url);
-      try {
-        let d;
-        if (item.useDocument) { d = document; logRequest({ url: item.url, kind: item.kind, status: 'current-document', ok: true, bytes: null, duration_ms: 0 }); }
-        else { if (!firstFetch) await sleep(delay + Math.floor(delay * 0.25 * Math.random())); firstFetch = false; d = await fetchDoc(item.url, item.kind); }
-        S.counts.pages += 1;
-        const before = { forums: S.counts.forums, threads: S.counts.threads, posts: S.counts.posts, links: S.counts.links, resources: S.counts.resources };
-        if (item.kind === 'index') await handleIndex(d, item.url);
-        else if (item.kind === 'forum') await handleForum(d, item.url);
-        else if (item.kind === 'thread') await handleThread(d, item.url);
-        const request = [...S.requestLog].reverse().find((x) => x.url === item.url && x.kind === item.kind);
-        if (request) request.records_added = { forums: S.counts.forums - before.forums, threads: S.counts.threads - before.threads, posts: S.counts.posts - before.posts, links: S.counts.links - before.links, resources: S.counts.resources - before.resources };
-      } catch (e) { S.counts.errors += 1; S.lastError = String((e && e.message) || e); }
-      if (S.counts.pages % 5 === 0) mirror();
-      progress();
+    S.running = true; S.stop = false; S.archive = null; S.stamp = nowStamp(); S.checkpointNo = 0; S.checkpointBusy = false;
+    S.checkpointCursor = { forums: 0, threads: 0, posts: 0, links: 0, resources: 0, pages: 0, all: 0, requests: 0 };
+    progress();
+    const delay = Math.max(Number(S.opts.delayMs) || 1500, ((S.compliance && S.compliance.crawlDelay) || 0) * 1000);
+    const workers = clamp(Number(S.opts.concurrency) || 2, 1, 3);
+    const checkpointEvery = Math.max(25, Number(S.opts.checkpointEveryPages) || 100);
+    while ((S.queue.length || S.inFlight) && !S.stop) {
+      const batch = [];
+      while (batch.length < workers && S.queue.length && !S.stop) {
+        if (S.opts.maxRequests && S.counts.pages + S.inFlight >= S.opts.maxRequests) break;
+        const item = S.queue.shift(); S.queued.delete(item.url);
+        if (!S.visited.has(item.url)) batch.push(processItem(item, delay));
+      }
+      if (batch.length) await Promise.all(batch);
+      if (S.counts.pages && S.counts.pages % checkpointEvery < workers && !S.checkpointBusy) {
+        S.checkpointNo += 1;
+        try { await downloadCheckpoint(); } catch (e) { S.counts.errors += 1; S.lastError = 'checkpoint: ' + String((e && e.message) || e); }
+      }
+      mirror(); progress({ concurrency: workers, inFlight: S.inFlight, next_checkpoint_pages: checkpointEvery });
+      if (!batch.length && !S.inFlight && S.queue.length) await sleep(250);
     }
-    try { await downloadArchive(); }
-    catch (e) { S.counts.errors += 1; S.lastError = 'archive: ' + String((e && e.message) || e); }
-    S.running = false; mirror(); progress({ done: true });
+    if (!S.stop) {
+      try { await downloadArchive(); }
+      catch (e) { S.counts.errors += 1; S.lastError = 'archive: ' + String((e && e.message) || e); }
+    }
+    S.running = false; mirror(); progress({ done: true, inFlight: 0 });
   }
 
   function mirror() {
@@ -316,12 +399,12 @@
       if (S.running) { sendResponse({ ok: false, error: 'already running' }); return true; }
       chrome.storage.local.get('wf_compliance', (o) => {
         S.compliance = o.wf_compliance || null;
-        S.opts = Object.assign({ scope: 'current', delayMs: 4000, includePosts: true, maxPagesPer: 0, maxThreads: 0, maxRequests: 0 }, msg.opts || {});
+        S.opts = Object.assign({ scope: 'current', delayMs: 1500, retryAttempts: 3, concurrency: 2, checkpointEveryPages: 100, includePosts: true, maxPagesPer: 0, maxThreads: 0, maxRequests: 0 }, msg.opts || {});
         const scopeError = validateScopeStart();
         if (scopeError) { sendResponse({ ok: false, error: scopeError }); return; }
         S.queue = []; S.queued = new Set(); S.visited = new Set(); S.seenThreads = new Set(); S.seenPosts = new Set(); S.seenLinks = new Set(); S.seenResources = new Set();
         S.records = { forums: [], threads: [], posts: [], links: [], resources: [], pages: [], all: [] }; S.requestLog = []; S.skipped = [];
-        S.counts = { forums: 0, threads: 0, posts: 0, links: 0, resources: 0, pages: 0, errors: 0, skipped_disallow: 0 }; S.lastError = '';
+        S.counts = { forums: 0, threads: 0, posts: 0, links: 0, resources: 0, pages: 0, errors: 0, skipped_disallow: 0 }; S.lastError = ''; S.checkpointNo = 0; S.checkpointBusy = false; S.inFlight = 0; S.nextRequestAt = 0; S.consecutive403 = 0;
         seedQueue(); run(); sendResponse({ ok: true });
       });
       return true;

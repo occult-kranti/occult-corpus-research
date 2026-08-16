@@ -12,9 +12,10 @@ members-only), crawls forums → threads → posts, and downloads one organized 
 ## Use
 - The popup first shows the **site policy check** (see Compliance below). Acknowledge if prompted.
 - Pick a **Scope**: Current page · This thread · This forum · Whole board.
-- Set the **delay** (default 4000 ms — be polite), and optional caps (max pages/threads/requests).
-- **Start.** Keep the tab open. Progress shows live counts; when the crawl finishes, the extension downloads
-  `Downloads/WizardForums/wf-<timestamp>.zip`. The ZIP contains typed JSONL data, CSV indexes, crawl
+- Set the **delay** (default 4000 ms — be polite), optional caps, **concurrent requests** (default 2, maximum 3), and **checkpoint frequency** (default every 100 pages).
+- **Start.** Keep the tab open. Progress shows live counts and checkpoint status; while the crawl runs, the extension downloads
+  checkpoint delta ZIPs under `Downloads/WizardForums/wf-<timestamp>/checkpoints/`; when the crawl finishes it downloads
+  the final complete archive under `Downloads/WizardForums/wf-<timestamp>/final/`. The ZIPs contain typed JSONL data, CSV indexes, crawl
   metadata, robots policy metadata, request diagnostics, and a combined `data/all.ndjson` compatibility stream.
 - **Self-test page** reports what the parser matched on the current DOM — use it to confirm selectors
   on the live members-only markup, or if a theme update ever breaks something.
@@ -30,7 +31,9 @@ Each crawl produces one ZIP when it fits within the browser download limit. Larg
 | `metadata/requests.jsonl` | Visited URL, page kind, HTTP status, success state, byte count, duration, and errors |
 | `metadata/errors.json` | Request failures, robots-skipped URLs, stop state, and last error |
 | `metadata/schema.json` | Archive schema and compatibility information |
-| `metadata/archive_manifest.json` | Shared manifest listing every ZIP part and logical entry count |
+| `metadata/archive_manifest.json` | Shared manifest listing every ZIP part, export kind, checkpoint number, and logical entry count |
+| `metadata/checkpoint.json` | Checkpoint number, cumulative counts, queue state, and record cursors |
+| `metadata/checkpoints.json` | Final-archive index of checkpoint exports and delta-application guidance |
 | `metadata/part.json` | Part number, total part count, and filename for the current ZIP |
 | `data/forums.jsonl` | Complete forum records with descriptions, counts, sub-forums, source URL, and timestamps |
 | `data/threads.jsonl` | Complete thread records with author, prefix, counts, timestamps, status flags, and source URL |
@@ -47,7 +50,7 @@ thread pagination, and every accessible thread discovered in every forum. Link r
 source context, internal/external status, and resource classification. Attachment, PDF, book, and document
 URLs are recorded as metadata; binary files are not downloaded automatically.
 
-When multiple ZIP parts are produced, extract all of them into the same directory. JSONL/CSV files split across parts use ordered `.part-001`, `.part-002` suffixes and can be concatenated in lexical order; `metadata/archive_manifest.json` describes the complete set. Existing NDJSON downloads can be reorganized with `python3 tools/ndjson_to_archive.py old.ndjson organized.zip`.
+When multiple ZIP parts are produced, extract all parts into the same directory. JSONL/CSV files split across parts use ordered `.part-001`, `.part-002` suffixes and can be concatenated in lexical order; `metadata/archive_manifest.json` describes the complete set. Checkpoint archives contain only records added since the preceding checkpoint and are safe to apply in checkpoint-number order. To merge extracted checkpoint deltas, run `python3 tools/merge_checkpoints.py extracted_root merged_output`. Existing NDJSON downloads can be reorganized with `python3 tools/ndjson_to_archive.py old.ndjson organized.zip`.
 The converter preserves the original combined stream and creates the same typed JSONL, CSV, and metadata
 layout used by new crawls.
 
@@ -73,15 +76,13 @@ current site plus synthetic edge-case fixtures.
 `background/sw.js` parses robots directives and Content-Signal declarations and performs size-capped
 UTF-8-safe downloads. `content/content.js` performs same-origin authenticated fetching, polite delay
 and jitter, wildcard-aware Disallow/Allow enforcement, queue deduplication, ID-based record deduplication,
-full pagination traversal, per-page request diagnostics, link/resource extraction, and a size-aware multi-part ZIP archive builder
+full pagination traversal, per-page request diagnostics, link/resource extraction, adaptive 403/429/5xx retries, canonicalization of session-specific `/unread` URLs, bounded worker concurrency, durable checkpoint deltas, and a size-aware multi-part ZIP archive builder
 with JSONL and CSV outputs. Each part is kept below the browser-safe raw ZIP target and preserves complete JSONL/CSV records. Leave max pages, max threads, and max requests at `0` for exhaustive mode. `popup/` exposes scope selection,
-caps, compliance acknowledgement, self-test, live progress, and stop controls. Progress and a bounded
-resume mirror are stored in `chrome.storage.local`; a new crawl starts cleanly rather than silently
-mixing old output with a new run.
+caps, compliance acknowledgement, self-test, live progress, and stop controls. Progress, checkpoint cursors, and a bounded resume mirror are stored in `chrome.storage.local`; checkpoint ZIPs are append-only deltas and the final archive is a complete snapshot. A new crawl starts cleanly rather than silently mixing old output with a new run.
 
 ## Verification
 
-From this directory, run `node tests/test_chunking.js` to validate size-aware partitioning and complete-line boundaries. Run `node tests/test_parse.js` to validate the live homepage, live forum, and live
+From this directory, run `node tests/test_scheduler.js` for unread/tracking URL canonicalization. Run `node tests/test_chunking.js` to validate size-aware partitioning and complete-line boundaries. Run `node tests/test_parse.js` to validate the live homepage, live forum, and live
 thread fixtures together with synthetic cases for pagination, redirects, sticky and locked rows,
 localized counts, canonical URLs, missing post IDs, quotes, attachments, edits, signatures, deleted
 posts, ignored posts, login walls, outbound links, and PDF/book/document/archive classification. Run `node tests/test_compliance.js` to validate robots groups,

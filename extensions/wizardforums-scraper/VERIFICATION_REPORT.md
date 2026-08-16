@@ -23,8 +23,12 @@ The parser now normalizes canonical thread URLs, preserves stable forum slugs wh
 | Archive metadata | Crawl summary, robots policy, request log, error log, schema descriptor, typed JSONL, combined NDJSON, and CSV indexes | Passed |
 | Link/resource extraction | Internal/external links, PDF, ebook, document, archive, download, and attachment classification | Passed |
 | Full-board model | Forum/thread pagination, exhaustive queue defaults, per-page record counters, page/link/resource datasets | Passed |
+| Adaptive scheduler | Bounded 1–3 worker pool, shared pacing, retryable 403/408/425/429/5xx backoff, queue deduplication | Passed |
+| URL safety | `/unread`, post anchors, tracking parameters, trailing-slash canonicalization | Passed |
+| Checkpoint storage | Delta JSONL checkpoint layout, cursors, checkpoint manifests, final snapshot metadata | Passed |
+| Scheduler edge cases | Canonical URL regression tests and manifest version validation | Passed |
 
-The reproducible commands are `node tests/test_parse.js`, `node tests/test_compliance.js`, `node tests/test_archive.js`, `unzip -t /tmp/wizardforums-test-archive.zip`, `node --check lib/xf-parse.js`, `node --check content/content.js`, `node --check background/sw.js`, and `node --check popup/popup.js`.
+The reproducible commands are `node tests/test_parse.js`, `node tests/test_compliance.js`, `node tests/test_archive.js`, `node tests/test_chunking.js`, `node tests/test_scheduler.js`, `unzip -t /tmp/wizardforums-test-archive.zip`, `node --check lib/xf-parse.js`, `node --check content/content.js`, `node --check background/sw.js`, and `node --check popup/popup.js`.
 
 ## Submitted-output diagnosis
 
@@ -45,6 +49,12 @@ A submitted full-board run successfully collected 340 threads, 4,382 posts, and 
 Large JSONL and CSV entries are split only at complete newline boundaries and receive deterministic `.part-001`, `.part-002` suffixes. Each part includes `metadata/archive_manifest.json` and `metadata/part.json`; the manifest records all filenames, part counts, logical entry counts, and crawl counts. Empty entries, Unicode rows, duplicate-safe ordering, and oversized single-line records are handled explicitly. A single non-line-splittable entry larger than the safe threshold produces a clear error rather than silently truncating data.
 
 The archive chunking test suite passed together with parser, compliance, ZIP, and JavaScript syntax tests.
+
+## Adaptive scheduling and checkpoint storage
+
+Version 2.3.0 replaces the fully serial request loop with a bounded worker pool. The popup defaults to two concurrent requests and caps user-configurable concurrency at three. A shared request clock, randomized pacing, minimum delay, and exponential backoff are used for retryable 403, 408, 425, 429, and 5xx responses. Session-specific `/unread` and `/post-N` URLs are canonicalized to stable thread URLs, and tracking parameters are removed before queue deduplication. Unrestricted concurrency is intentionally not used because it can increase 403 responses and make a crawl less complete rather than faster.
+
+Every configured checkpoint interval, the crawler downloads delta ZIPs containing only records added since the previous checkpoint, plus a checkpoint manifest with cumulative counts, queue state, and record cursors. The final export remains a complete snapshot. Checkpoint deltas are stored under `checkpoints/cp-NNN/` and can be merged with `tools/merge_checkpoints.py`. Chrome storage mirrors bounded progress and checkpoint cursors so a long crawl has recoverable evidence even if the final export is interrupted.
 
 ## Live-site limitation
 

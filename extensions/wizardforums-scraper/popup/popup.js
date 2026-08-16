@@ -58,8 +58,12 @@ async function refreshProgress() {
     'links ' + (c.links || 0), 'resources ' + (c.resources || 0), 'pages ' + (c.pages || 0), 'queue ' + (p.queue || 0)];
   if (c.errors) parts.push('errors ' + c.errors);
   if (c.skipped_disallow) parts.push('skipped(disallow) ' + c.skipped_disallow);
+  if (p.concurrency) parts.push('workers ' + p.concurrency);
+  if (p.archive && (p.archive.status === 'checkpoint_exporting' || p.archive.status === 'checkpoint_ready')) {
+    parts.push('checkpoint ' + (p.archive.checkpoint || '?') + (p.archive.status === 'checkpoint_exporting' ? ' exporting' : ' ready'));
+  }
   if (p.archive && p.archive.status === 'exporting') {
-    parts.push('creating ZIP part ' + p.archive.part + '/' + p.archive.parts + ': ' + p.archive.filename);
+    parts.push('creating final ZIP part ' + p.archive.part + '/' + p.archive.parts + ': ' + p.archive.filename);
   } else if (p.archive && p.archive.filename) {
     const size = p.archive.bytes ? ' (' + Math.round(p.archive.bytes / 1024) + ' KB total)' : '';
     const count = p.archive.part_count ? ' [' + p.archive.part_count + ' parts]' : '';
@@ -82,6 +86,9 @@ $('start').addEventListener('click', async () => {
     maxPagesPer: parseInt($('maxPages').value, 10) || 0,
     maxThreads: parseInt($('maxThreads').value, 10) || 0,
     maxRequests: parseInt($('maxReq').value, 10) || 0,
+    concurrency: Math.max(1, Math.min(3, parseInt($('concurrency').value, 10) || 2)),
+    checkpointEveryPages: Math.max(25, parseInt($('checkpointEvery').value, 10) || 100),
+    retryAttempts: 3,
     includePosts: $('includePosts').checked,
   };
   const r = await send(tab.id, { type: 'WF_START', opts });
