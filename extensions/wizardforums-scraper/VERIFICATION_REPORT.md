@@ -30,7 +30,7 @@ The parser now normalizes canonical thread URLs, preserves stable forum slugs wh
 | Checkpoint storage | Delta JSONL checkpoint layout, cursors, checkpoint manifests, final snapshot metadata | Passed |
 | Scheduler edge cases | Canonical URL regression tests and manifest version validation | Passed |
 
-The reproducible commands are `node tests/test_parse.js`, `node tests/test_compliance.js`, `node tests/test_archive.js`, `node tests/test_chunking.js`, `node tests/test_scheduler.js`, `unzip -t /tmp/wizardforums-test-archive.zip`, `node --check lib/xf-parse.js`, `node --check content/content.js`, `node --check background/sw.js`, and `node --check popup/popup.js`.
+The reproducible commands are `node tests/test_parse.js`, `node tests/test_compliance.js`, `node tests/test_archive.js`, `node tests/test_chunking.js`, `node tests/test_scheduler.js`, `node tests/test_analysis_features.js`, `unzip -t /tmp/wizardforums-test-archive.zip`, `node --check lib/xf-parse.js`, `node --check content/content.js`, `node --check background/sw.js`, and `node --check popup/popup.js`.
 
 ## Submitted-output diagnosis
 
@@ -63,6 +63,14 @@ Every configured checkpoint interval, the crawler downloads delta ZIPs containin
 Version 2.4.0 excludes the forum identified on the live homepage as `Introductions`, URL `/forums/introductions.5/`. The exclusion is applied by forum ID, slug, title, and canonical URL before queueing, so its forum pages, pagination pages, and discovered threads are not fetched in Whole board mode. A direct This forum crawl of that forum is rejected with an explicit message. The omission is recorded in `skipped_excluded` progress and archive metadata.
 
 The v2.4.0 scheduler regression suite passed the exact Introductions URL, its pagination URL, a similarly named non-excluded forum, and title-based fallback matching.
+
+## v2.5 logical audit and analysis-quality improvements
+
+The v2.5 audit identified and corrected several risks. The Unicode feature extractor initially contained over-escaped regular expressions that failed JavaScript syntax checks; the expressions were corrected and tested with Cyrillic, CJK, punctuation, URLs, empty bodies, and missing IDs. Forum and thread deduplication now uses stable URL fallbacks when numeric IDs are absent. The global max-thread cap is enforced before emitting additional thread records, and anonymous-post fallback keys include the thread identity to avoid cross-thread collisions.
+
+The organized archive now separates lossless records from compact analysis tables. Raw body text and HTML remain in `data/posts.jsonl`; `index/posts.csv` contains compact metadata, while `index/post_features.csv` contains derived Unicode-aware token, sentence, punctuation, URL, quote, attachment, reaction, and empty-body features. `analysis/profile.json`, `analysis/data_dictionary.json`, and `analysis/quality_gates.json` provide machine-readable coverage, missingness, duplicate-risk, HTTP-status, link-domain, resource-type, and go/no-go information.
+
+The repository analysis layer now includes `analysis/review_loop.py`. It runs the archive smoke test and applies explicit gates for archive integrity, post availability, completion status, request error rate, duplicate identities, privacy/quote risk, and construct validity. The loop was run against a real submitted archive and correctly returned `BLOCK` because it contained zero posts.
 
 ## Live-site limitation
 

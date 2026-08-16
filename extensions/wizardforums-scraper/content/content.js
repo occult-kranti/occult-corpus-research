@@ -7,12 +7,12 @@
   window.__wfScraperLoaded = true;
   const XF = window.XFParse;
   const ORIGIN = 'https://wizardforums.com';
-  const VERSION = '2.4.0';
+  const VERSION = '2.5.0';
   const EXCLUDED_FORUMS = new Set(['5', 'introductions', 'introductions.5']);
 
   const S = {
     running: false, stop: false, opts: null, compliance: null,
-    queue: [], queued: new Set(), visited: new Set(), seenThreads: new Set(), seenPosts: new Set(), seenLinks: new Set(), seenResources: new Set(),
+    queue: [], queued: new Set(), visited: new Set(), seenForums: new Set(), seenThreads: new Set(), seenPosts: new Set(), seenLinks: new Set(), seenResources: new Set(),
     records: { forums: [], threads: [], posts: [], links: [], resources: [], pages: [], all: [] }, requestLog: [], skipped: [],
     stamp: '', counts: { forums: 0, threads: 0, posts: 0, links: 0, resources: 0, pages: 0, errors: 0, skipped_disallow: 0 },
     lastError: '', archive: null, checkpointNo: 0, checkpointBusy: false, checkpointCursor: { forums: 0, threads: 0, posts: 0, links: 0, resources: 0, pages: 0, all: 0, requests: 0 },
@@ -52,6 +52,34 @@
   const jsonl = (xs) => xs.map((x) => JSON.stringify(x)).join('\n') + (xs.length ? '\n' : '');
   const csvCell = (v) => '"' + String(v == null ? '' : (typeof v === 'object' ? JSON.stringify(v) : v)).replace(/"/g, '""') + '"';
   const csv = (rows, columns) => [columns.join(','), ...rows.map((r) => columns.map((c) => csvCell(r[c])).join(','))].join('\n') + '\n';
+  function words(text) { return String(text || '').toLowerCase().match(/[\p{L}\p{N}]+/gu) || []; }
+  function postFeatureRow(p) {
+    const text = String(p.body_text || ''); const ws = words(text); const unique = new Set(ws);
+    return { post_id: p.id || null, thread_id: p.thread_id || null, thread_title: p.thread_title || null, forum_id: p.forum && p.forum.id || null,
+      author: p.author || null, posted_at: p.posted_at || null, body_text_length: text.length, body_html_length: String(p.body_html || '').length,
+      word_count: ws.length, unique_word_count: unique.size, sentence_count: (text.match(/[.!?]+(?=\s|$)/g) || []).length,
+      question_count: (text.match(/\?/g) || []).length, exclamation_count: (text.match(/!/g) || []).length,
+      url_count: (text.match(/https?:\/\/|www\./gi) || []).length, quote_count: p.quote_count || 0, attachment_count: p.attachment_count || 0,
+      link_count: Array.isArray(p.links) ? p.links.length : 0, reaction_count: Number(p.reactions_count || 0),
+      has_reactions: !!p.has_reactions, empty_body: text.trim().length === 0, edited: !!p.edited, deleted: !!p.deleted, ignored: !!p.ignored, source_url: p.source_url || null };
+  }
+  function domainOf(url) { try { return new URL(url).hostname.toLowerCase(); } catch (e) { return ''; } }
+  function percentile(values, q) { if (!values.length) return null; const a = values.slice().sort((x, y) => x - y); return a[Math.min(a.length - 1, Math.floor((a.length - 1) * q))]; }
+  function analysisProfile() {
+    const posts = S.records.posts, lengths = posts.map((p) => Number(p.body_text_length || 0));
+    const domains = {}, resources = {}, statuses = {};
+    for (const l of S.records.links) { const d = domainOf(l.link_url); if (d) domains[d] = (domains[d] || 0) + 1; }
+    for (const r of S.records.resources) resources[r.resource_type || 'unknown'] = (resources[r.resource_type || 'unknown'] || 0) + 1;
+    for (const x of S.requestLog) { const k = String(x.status == null ? 'network_error' : x.status); statuses[k] = (statuses[k] || 0) + 1; }
+    const dateValues = posts.map((p) => p.posted_at).concat(S.records.threads.map((t) => t.created)).filter(Boolean).sort();
+    const duplicateRisk = { forums: S.records.forums.length - new Set(S.records.forums.map((x) => x.id || x.url)).size, threads: S.records.threads.length - new Set(S.records.threads.map((x) => x.id || x.url)).size, posts: posts.length - new Set(posts.map((x) => x.id || x.source_url + '#' + x.post_number)).size };
+    return { profile_version: '1.0', generated_at: isoNow(), record_counts: Object.fromEntries(Object.entries(S.records).map(([k, v]) => [k, v.length])), crawl_counts: S.counts,
+      quality_gates: { has_threads: S.records.threads.length > 0, has_posts_when_requested: !S.opts.includePosts || posts.length > 0, error_rate: S.requestLog.length ? S.requestLog.filter((x) => x.ok === false).length / S.requestLog.length : 0, duplicate_risk: duplicateRisk, empty_post_rate: posts.length ? posts.filter((p) => !String(p.body_text || '').trim()).length / posts.length : null },
+      post_body: { min_length: lengths.length ? Math.min(...lengths) : null, median_length: percentile(lengths, 0.5), p90_length: percentile(lengths, 0.9), max_length: lengths.length ? Math.max(...lengths) : null, date_min: dateValues[0] || null, date_max: dateValues[dateValues.length - 1] || null },
+      top_link_domains: Object.entries(domains).sort((a, b) => b[1] - a[1]).slice(0, 50).map(([domain, count]) => ({ domain, count })), resource_types: resources, http_statuses: statuses,
+      exclusions: { introductions_forum: S.counts.skipped_excluded || 0 }, recommendations: [S.records.posts.length === 0 ? 'Do not run topic analysis until posts are present.' : null, S.counts.errors ? 'Review metadata/errors.json and request status distribution before interpreting coverage.' : null, duplicateRisk.posts ? 'Investigate duplicate post keys before graph or topic analysis.' : null].filter(Boolean) };
+  }
+  function dataDictionary() { return { generated_at: isoNow(), fields: { 'data/posts.jsonl': { body_text: 'Visible post text with signatures and chrome removed where parser can identify them.', body_html: 'Sanitized/raw message content HTML as captured from the page.', thread_id: 'Stable XenForo thread identifier.', post_number: 'Display position within the thread when available.' }, 'index/post_features.csv': { word_count: 'Unicode-aware token count from body_text.', unique_word_count: 'Distinct lowercase token count.', empty_body: 'Whether body_text is empty after trimming.', link_count: 'Links extracted from the post.' }, 'data/links.jsonl': { link_url: 'Absolute URL.', source_url: 'Page URL where link was observed.', post_id: 'Source post ID when available.', external: 'Whether hostname is outside wizardforums.com.' }, 'data/resources.jsonl': { resource_type: 'Classifier output such as pdf, ebook, document, archive, or download.' } } }; }
 
   function progress(extra) {
     const p = Object.assign({ running: S.running, counts: S.counts, queue: S.queue.length,
@@ -151,6 +179,9 @@
   async function handleIndex(d, url) {
     addPageLinks(d, url, 'index');
     for (const f of XF.parseBoardIndex(d, url).forums) {
+      const forumKey = f.id || f.url;
+      if (forumKey && S.seenForums.has(forumKey)) continue;
+      if (forumKey) S.seenForums.add(forumKey);
       if (isExcludedForum(f.url, f.title)) { S.counts.skipped_excluded += 1; S.skipped.push({ url: f.url, kind: 'forum', reason: 'excluded_forum_introductions', title: f.title, at: isoNow() }); continue; }
       emit(Object.assign({ type: 'forum' }, f, { source_url: url }));
       enqueue(f.url, 'forum');
@@ -162,8 +193,10 @@
     addPageLinks(d, url, 'forum');
     const parsed = XF.parseForumNode(d, url);
     for (const t of parsed.threads) {
-      if (t.id && S.seenThreads.has(t.id)) continue;
-      if (t.id) S.seenThreads.add(t.id);
+      if (S.opts.maxThreads && S.counts.threads >= S.opts.maxThreads) break;
+      const threadKey = t.id || t.url;
+      if (threadKey && S.seenThreads.has(threadKey)) continue;
+      if (threadKey) S.seenThreads.add(threadKey);
       emit(Object.assign({ type: 'thread' }, t, { source_url: url }));
       if (S.opts.includePosts && !t.redirect && (!S.opts.maxThreads || S.counts.threads <= S.opts.maxThreads)) enqueue(t.url, 'thread');
     }
@@ -178,7 +211,7 @@
     }
     if (parsed.loginWall) S.lastError = 'login wall: ' + url + ' (are you logged in?)';
     for (const p of parsed.posts) {
-      const key = p.id || (url + '#' + (p.post_number || p.author || 'unknown'));
+      const key = p.id || (parsed.thread.id ? parsed.thread.id + '#' + (p.post_number || p.author || 'unknown') : url + '#' + (p.post_number || p.author || 'unknown'));
       if (S.seenPosts.has(key)) continue;
       S.seenPosts.add(key);
       emit(Object.assign({ type: 'post', thread_id: parsed.thread.id, thread_title: parsed.thread.title,
@@ -198,14 +231,14 @@
 
   function archiveEntries() {
     const crawledAt = isoNow();
-    const crawl = { schema_version: '2.3', scraper_version: VERSION, archive_created_at: crawledAt,
+    const crawl = { schema_version: '2.5', scraper_version: VERSION, archive_created_at: crawledAt,
       crawl_started_at: S.stamp, current_url: location.href, scope: S.opts.scope, options: S.opts, scheduler: { concurrency: S.opts.concurrency, retry_attempts: S.opts.retryAttempts, checkpoint_every_pages: S.opts.checkpointEveryPages },
       checkpoints: { count: S.checkpointNo, last: S.checkpointNo ? S.checkpointNo : null },
       counts: S.counts, queue_remaining: S.queue.length, visited_pages: S.visited.size, stopped: S.stop, last_error: S.lastError,
       page_type: XF.detectPageType(location.href), selftest: XF.selftest(document, location.href) };
-    const errors = { schema_version: '2.3', errors: S.requestLog.filter((x) => x.error || x.ok === false),
+    const errors = { schema_version: '2.5', errors: S.requestLog.filter((x) => x.error || x.ok === false),
       skipped: S.skipped, last_error: S.lastError, stopped: S.stop, generated_at: crawledAt };
-    const schema = { schema_version: '2.3', description: 'WizardForums full-board analysis archive with checkpoint deltas', record_types: {
+    const schema = { schema_version: '2.5', description: 'WizardForums full-board analysis archive with checkpoint deltas', record_types: {
       forum: 'data/forums.jsonl', thread: 'data/threads.jsonl', post: 'data/posts.jsonl', link: 'data/links.jsonl', resource: 'data/resources.jsonl', page: 'data/pages.jsonl' },
       compatibility: 'data/all.ndjson contains every typed record; every record has scraped_at and scraper_version.' };
     const readme = 'WizardForums Scraper full-board analysis archive\n===============================================\n\n'
@@ -216,7 +249,8 @@
       + 'The archive reflects only content visible to the authenticated browser session and the selected scope. A full-board crawl can be large and should be allowed to finish.\n';
     const forumCols = ['id', 'slug', 'url', 'title', 'description', 'threads_count', 'messages_count', 'sub_forums', 'source_url', 'scraped_at'];
     const threadCols = ['id', 'url', 'title', 'slug', 'prefix', 'author', 'author_id', 'author_url', 'forum', 'created', 'reply_count', 'view_count', 'last_post', 'sticky', 'locked', 'redirect', 'source_url', 'scraped_at'];
-    const postCols = ['id', 'thread_id', 'thread_title', 'forum', 'author', 'author_id', 'post_number', 'posted_at', 'body_text', 'body_html', 'body_text_length', 'body_html_length', 'quote_count', 'attachment_count', 'attachments', 'links', 'reactions_count', 'has_reactions', 'edited', 'deleted', 'ignored', 'source_url', 'scraped_at'];
+    const postCols = ['id', 'thread_id', 'thread_title', 'forum', 'author', 'author_id', 'post_number', 'posted_at', 'body_text_length', 'body_html_length', 'quote_count', 'attachment_count', 'reactions_count', 'has_reactions', 'edited', 'deleted', 'ignored', 'source_url', 'scraped_at'];
+    const postFeatureCols = ['post_id', 'thread_id', 'thread_title', 'forum_id', 'author', 'posted_at', 'body_text_length', 'body_html_length', 'word_count', 'unique_word_count', 'sentence_count', 'question_count', 'exclamation_count', 'url_count', 'quote_count', 'attachment_count', 'link_count', 'reaction_count', 'has_reactions', 'empty_body', 'edited', 'deleted', 'ignored', 'source_url'];
     const linkCols = ['link_url', 'link_text', 'link_title', 'rel', 'download_name', 'external', 'resource_type', 'thread_id', 'post_id', 'thread_title', 'post_number', 'page_kind', 'source_url', 'scraped_at'];
     const resourceCols = ['link_url', 'link_text', 'resource_type', 'download_name', 'external', 'thread_id', 'post_id', 'thread_title', 'post_number', 'source_url', 'scraped_at'];
     return [
@@ -226,6 +260,9 @@
       { name: 'metadata/requests.jsonl', data: jsonl(S.requestLog) },
       { name: 'metadata/errors.json', data: json(errors) },
       { name: 'metadata/schema.json', data: json(schema) },
+      { name: 'analysis/profile.json', data: json(analysisProfile()) },
+      { name: 'analysis/data_dictionary.json', data: json(dataDictionary()) },
+      { name: 'analysis/quality_gates.json', data: json({ generated_at: isoNow(), gates: [{ name: 'posts_present', pass: !S.opts.includePosts || S.records.posts.length > 0, action: 'Do not interpret post-level results if false.' }, { name: 'request_error_rate', pass: !S.requestLog.length || S.requestLog.filter((x) => x.ok === false).length / S.requestLog.length < 0.1, action: 'Review errors and coverage before inference.' }, { name: 'duplicate_keys', pass: analysisProfile().quality_gates.duplicate_risk.posts === 0, action: 'Resolve duplicate identity keys before network analysis.' }] }) },
       { name: 'metadata/checkpoints.json', data: json({ archive_id: S.stamp, checkpoint_count: S.checkpointNo, checkpoint_directory: 'checkpoints/', note: 'Checkpoint archives are deltas; apply them in order before the final snapshot.' }) },
       { name: 'data/forums.jsonl', data: jsonl(S.records.forums) },
       { name: 'data/threads.jsonl', data: jsonl(S.records.threads) },
@@ -237,6 +274,7 @@
       { name: 'index/forums.csv', data: csv(S.records.forums, forumCols) },
       { name: 'index/threads.csv', data: csv(S.records.threads, threadCols) },
       { name: 'index/posts.csv', data: csv(S.records.posts, postCols) },
+      { name: 'index/post_features.csv', data: csv(S.records.posts.map(postFeatureRow), postFeatureCols) },
       { name: 'index/links.csv', data: csv(S.records.links, linkCols) },
       { name: 'index/resources.csv', data: csv(S.records.resources, resourceCols) },
     ];
@@ -289,7 +327,7 @@
   }
   function checkpointEntries() {
     const entries = [
-      { name: 'metadata/checkpoint.json', data: json({ schema_version: '2.3', archive_id: S.stamp, checkpoint: S.checkpointNo, created_at: isoNow(), counts: S.counts, queue_remaining: S.queue.length, visited_pages: S.visited.size, cursor: S.checkpointCursor, note: 'Checkpoint contains only records added since the previous checkpoint; apply in order.' }) },
+      { name: 'metadata/checkpoint.json', data: json({ schema_version: '2.5', archive_id: S.stamp, checkpoint: S.checkpointNo, created_at: isoNow(), counts: S.counts, queue_remaining: S.queue.length, visited_pages: S.visited.size, cursor: S.checkpointCursor, note: 'Checkpoint contains only records added since the previous checkpoint; apply in order.' }) },
       { name: 'metadata/requests.jsonl', data: jsonl(sliceSince('requests')) },
       { name: 'data/forums.jsonl', data: jsonl(sliceSince('forums')) },
       { name: 'data/threads.jsonl', data: jsonl(sliceSince('threads')) },
@@ -304,7 +342,7 @@
   async function downloadEntries(rawEntries, base, kind) {
     const parts = buildArchiveParts(rawEntries);
     const partNames = parts.map((_, i) => base + '-part-' + String(i + 1).padStart(3, '0') + '-of-' + String(parts.length).padStart(3, '0') + '.zip');
-    const manifest = { schema_version: '2.3', archive_id: S.stamp, export_kind: kind, checkpoint: kind === 'checkpoint' ? S.checkpointNo : null,
+    const manifest = { schema_version: '2.5', archive_id: S.stamp, export_kind: kind, checkpoint: kind === 'checkpoint' ? S.checkpointNo : null,
       part_count: parts.length, parts: partNames.map((name, i) => ({ part: i + 1, filename: name, entry_count: parts[i].length })),
       logical_entry_count: rawEntries.length, counts: S.counts, created_at: isoNow(), note: 'Extract all parts in order. Checkpoints contain deltas; final parts contain the complete snapshot.' };
     const downloaded = []; let totalBytes = 0;
@@ -338,6 +376,7 @@
     globalThis.__WF_TEST__.splitLargeEntry = splitLargeEntry;
     globalThis.__WF_TEST__.canonicalCrawlUrl = canonicalCrawlUrl;
     globalThis.__WF_TEST__.isExcludedForum = isExcludedForum;
+    globalThis.__WF_TEST__.postFeatureRow = postFeatureRow;
   }
 
   async function processItem(item, delay) {
@@ -416,7 +455,7 @@
         S.opts = Object.assign({ scope: 'current', delayMs: 1500, retryAttempts: 3, concurrency: 2, checkpointEveryPages: 100, includePosts: true, maxPagesPer: 0, maxThreads: 0, maxRequests: 0 }, msg.opts || {});
         const scopeError = validateScopeStart();
         if (scopeError) { sendResponse({ ok: false, error: scopeError }); return; }
-        S.queue = []; S.queued = new Set(); S.visited = new Set(); S.seenThreads = new Set(); S.seenPosts = new Set(); S.seenLinks = new Set(); S.seenResources = new Set();
+        S.queue = []; S.queued = new Set(); S.visited = new Set(); S.seenForums = new Set(); S.seenThreads = new Set(); S.seenPosts = new Set(); S.seenLinks = new Set(); S.seenResources = new Set();
         S.records = { forums: [], threads: [], posts: [], links: [], resources: [], pages: [], all: [] }; S.requestLog = []; S.skipped = [];
         S.counts = { forums: 0, threads: 0, posts: 0, links: 0, resources: 0, pages: 0, errors: 0, skipped_disallow: 0, skipped_excluded: 0 }; S.lastError = ''; S.checkpointNo = 0; S.checkpointBusy = false; S.inFlight = 0; S.nextRequestAt = 0; S.consecutive403 = 0;
         seedQueue(); run(); sendResponse({ ok: true });

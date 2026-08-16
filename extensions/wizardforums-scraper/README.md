@@ -43,10 +43,14 @@ Each crawl produces one ZIP when it fits within the browser download limit. Larg
 | `data/pages.jsonl` | Page-level records with page kind, URL, and link totals |
 | `data/all.ndjson` | Combined stream containing every forum, thread, post, link, resource, and page record |
 | `index/*.csv` | Analysis-ready forum, thread, post, link, and resource indexes |
+| `index/post_features.csv` | Compact analysis features: Unicode-aware words, unique words, sentence/question/exclamation counts, URLs, links, empty-body, and status flags |
+| `analysis/profile.json` | Coverage, error-rate, duplicate-risk, temporal, body-length, link-domain, and resource-type profile |
+| `analysis/data_dictionary.json` | Definitions of lossless and derived analysis fields |
+| `analysis/quality_gates.json` | Go/no-go checks before topic, network, or post-level interpretation |
 
 Whole-board archives omit the Introductions forum by design. The omission is recorded in `metadata/crawl.json` and `metadata/errors.json` as `skipped_excluded`; a direct This forum crawl of Introductions is rejected rather than silently collecting it.
 
-The JSONL files preserve nested metadata without flattening. `body_text` excludes signatures, edit notes,
+The JSONL files preserve nested metadata without flattening. The compact CSV tables intentionally omit raw post bodies; use `data/posts.jsonl` when full text or HTML is required. Review `analysis/profile.json` and `analysis/quality_gates.json` before statistical, topic, network, or post-level analysis. `body_text` excludes signatures, edit notes,
 and footer chrome; `body_html` keeps the raw content HTML. Whole-board mode follows forum pagination,
 thread pagination, and every accessible thread discovered in every forum. Link records preserve visible text,
 source context, internal/external status, and resource classification. Attachment, PDF, book, and document

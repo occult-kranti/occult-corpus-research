@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Wizard Forums Scraper",
-  "version": "2.4.0",
-  "description": "Rate-safe full-board WizardForums archiver with adaptive crawling, checkpoint ZIPs, posts, links, resources, and analysis-ready data; excludes Introductions. Honors robots.txt and Content-Signal policy.",
+  "version": "2.5.0",
+  "description": "Reviewed rate-safe full-board WizardForums archiver with adaptive crawling, checkpoint ZIPs, posts, links, resources, and analysis-quality profiles; excludes Introductions. Honors robots.txt and Content-Signal policy.",
   "permissions": ["storage", "downloads", "activeTab", "scripting"],
   "host_permissions": ["https://wizardforums.com/*"],
   "action": { "default_popup": "popup/popup.html", "default_title": "Wizard Forums Scraper" },

@@ -15,7 +15,7 @@ REQUIRED = {
     "data/forums.jsonl", "data/threads.jsonl", "data/posts.jsonl",
     "index/forums.csv", "index/threads.csv", "index/posts.csv",
 }
-OPTIONAL = {"data/links.jsonl", "data/resources.jsonl", "data/pages.jsonl", "metadata/requests.jsonl"}
+OPTIONAL = {"data/links.jsonl", "data/resources.jsonl", "data/pages.jsonl", "metadata/requests.jsonl", "analysis/profile.json", "analysis/data_dictionary.json", "analysis/quality_gates.json", "index/post_features.csv"}
 URL_RE = re.compile(r"^https://wizardforums\.com/")
 
 def load_jsonl(zf: zipfile.ZipFile, name: str):
@@ -54,12 +54,18 @@ def check(path: str) -> dict:
                         fail(f"{file_name}:{i}: post missing thread_id")
                     if kind in {"links", "resources"} and not row.get("link_url"):
                         fail(f"{file_name}:{i}: link/resource missing link_url")
-                    if row.get("posted_at", {}).get("iso"):
-                        try: datetime.fromisoformat(row["posted_at"]["iso"].replace("Z", "+00:00"))
+                    posted = row.get("posted_at")
+                    if isinstance(posted, dict) and posted.get("iso"):
+                        try: datetime.fromisoformat(str(posted["iso"]).replace("Z", "+00:00"))
                         except ValueError: fail(f"{file_name}:{i}: invalid posted_at.iso")
+                    elif isinstance(posted, str) and posted:
+                        try: datetime.fromisoformat(posted.replace("Z", "+00:00"))
+                        except ValueError: result["warnings"].append(f"{file_name}:{i}: non-ISO posted_at string")
             if result["counts"].get("posts", 0) == 0:
                 result["warnings"].append("no posts present; post/topic analysis is blocked until a successful thread crawl is supplied")
-            for csv_name in ("index/forums.csv", "index/threads.csv", "index/posts.csv"):
+            for optional_name in sorted(OPTIONAL & names):
+                result.setdefault("optional_files", []).append(optional_name)
+            for csv_name in ("index/forums.csv", "index/threads.csv", "index/posts.csv", "index/post_features.csv"):
                 if csv_name in names:
                     rows = list(csv.DictReader(io.StringIO(zf.read(csv_name).decode("utf-8"))))
                     if csv_name.endswith("posts.csv") and not rows:
